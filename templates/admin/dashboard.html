@@ -1,0 +1,290 @@
+{% extends 'base.html' %}
+{% block title %}Admin Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+  .stat-card-link { text-decoration: none; color: inherit; }
+  .stat-card-link .card { transition: transform 0.2s, box-shadow 0.2s; }
+  .stat-card-link:hover .card { transform: translateY(-3px); box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+
+  <h4 class="mb-4"><i class="bi bi-speedometer2 me-2"></i>Admin Dashboard</h4>
+
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+      <a href="{{ url_for('admin.students') }}" class="stat-card-link">
+        <div class="card text-center p-3">
+          <div class="fs-2 fw-bold text-primary">{{ total_students }}</div>
+          <div class="text-muted small">Students</div>
+        </div>
+      </a>
+    </div>
+    <div class="col-6 col-md-3">
+      <a href="{{ url_for('admin.companies') }}" class="stat-card-link">
+        <div class="card text-center p-3">
+          <div class="fs-2 fw-bold text-success">{{ total_companies }}</div>
+          <div class="text-muted small">Companies</div>
+        </div>
+      </a>
+    </div>
+    <div class="col-6 col-md-3">
+      <a href="{{ url_for('admin.drives') }}" class="stat-card-link">
+        <div class="card text-center p-3">
+          <div class="fs-2 fw-bold text-warning">{{ total_drives }}</div>
+          <div class="text-muted small">Drives</div>
+        </div>
+      </a>
+    </div>
+    <div class="col-6 col-md-3">
+      <a href="{{ url_for('admin.applications') }}" class="stat-card-link">
+        <div class="card text-center p-3">
+          <div class="fs-2 fw-bold text-danger">{{ total_apps }}</div>
+          <div class="text-muted small">Applications</div>
+        </div>
+      </a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
+      <div>
+        <i class="bi bi-hourglass-split me-2 text-warning"></i>Pending Company Approvals
+        <span class="badge bg-warning text-dark ms-2">{{ pending_companies_count }}</span>
+      </div>
+      <a href="{{ url_for('admin.companies', status='Pending') }}" class="btn btn-sm btn-outline-primary">Manage All</a>
+    </div>
+    <div class="card-body p-0">
+      {% if pending_companies %}
+        <table class="table table-hover mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Company</th>
+              <th>Email</th>
+              <th>Industry</th>
+              <th>Registered</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for company in pending_companies %}
+            <tr>
+              <td class="fw-semibold">{{ company.company_name }}</td>
+              <td>{{ company.email }}</td>
+              <td>{{ company.industry or '—' }}</td>
+              <td>{{ company.created_at.strftime('%d %b %Y') }}</td>
+              <td>
+                <form method="POST" action="{{ url_for('admin.approve_company', company_id=company.id) }}" class="d-inline">
+                  <button class="btn btn-success btn-sm">Approve</button>
+                </form>
+                <form method="POST" action="{{ url_for('admin.reject_company', company_id=company.id) }}" class="d-inline ms-1">
+                  <button class="btn btn-danger btn-sm">Reject</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% if pending_companies_count > 5 %}
+        <div class="card-footer bg-light text-center border-0">
+            <span class="text-muted small">Showing top 5. <a href="{{ url_for('admin.companies', status='Pending') }}">View all {{ pending_companies_count }} pending companies</a></span>
+        </div>
+        {% endif %}
+      {% else %}
+        <p class="text-muted p-3 mb-0">No pending approvals.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card mt-4 mb-4">
+    <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
+      <div>
+        <i class="bi bi-briefcase me-2 text-info"></i>Pending Drive Approvals
+        <span class="badge bg-info text-dark ms-2">{{ pending_drives_count }}</span>
+      </div>
+      <a href="{{ url_for('admin.drives', status='Pending') }}" class="btn btn-sm btn-outline-info">Manage All</a>
+    </div>
+    <div class="card-body p-0">
+      {% if pending_drives %}
+        <table class="table table-hover mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Job Title</th><th>Company</th>
+              <th>Deadline</th><th>Posted</th><th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for d in pending_drives %}
+            <tr>
+              <td class="fw-semibold">{{ d.job_title }}</td>
+              <td>{{ d.company.company_name }}</td>
+              <td>{{ d.created_at.strftime('%d %b %Y') if d.created_at else '—' }}</td>
+              <td>{{ d.created_at.strftime('%d %b %Y') }}</td>
+              <td>
+                <form method="POST"
+                      action="{{ url_for('admin.approve_drive', drive_id=d.id) }}"
+                      class="d-inline">
+                  <button class="btn btn-success btn-sm">Approve</button>
+                </form>
+                <form method="POST"
+                      action="{{ url_for('admin.reject_drive', drive_id=d.id) }}"
+                      class="d-inline ms-1">
+                  <button class="btn btn-danger btn-sm">Reject</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% if pending_drives_count > 5 %}
+        <div class="card-footer bg-light text-center border-0">
+            <span class="text-muted small">Showing top 5. <a href="{{ url_for('admin.drives', status='Pending') }}">View all {{ pending_drives_count }} pending drives</a></span>
+        </div>
+        {% endif %}
+      {% else %}
+        <p class="text-muted p-3 mb-0">No pending drive approvals.</p>
+      {% endif %}
+    </div>
+  </div>
+
+<div class="card mt-4 mb-4">
+  <div class="card-header bg-white fw-semibold">
+    <i class="bi bi-braces me-2 text-secondary"></i>API Reference
+    <span class="text-muted small ms-2">use the request builder below to test endpoints</span>
+  </div>
+  <div class="card-body">
+
+    {# ── API cheat-sheet ── #}
+    <div class="row g-3 mb-4">
+
+      <div class="col-md-6">
+        <div class="border rounded p-3 h-100" style="background:#f8f9fa;">
+          <p class="fw-semibold mb-1"><span class="badge bg-success me-1">GET</span> /api/stats</p>
+          <p class="text-muted small mb-2">Returns total counts of students, companies, drives, applications.</p>
+          <p class="fw-semibold mb-1 mt-2"><span class="badge bg-success me-1">GET</span> /api/students</p>
+          <p class="text-muted small mb-0">Returns list of all students (id, name, email).</p>
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <div class="border rounded p-3 h-100" style="background:#f8f9fa;">
+          <p class="fw-semibold mb-1"><span class="badge bg-primary me-1">POST</span> /api/students</p>
+          <p class="text-muted small mb-1">Create a new student. Copy this into the body field:</p>
+          <pre class="mb-0" style="font-size:11px; background:#1e1e1e; color:#d4d4d4; border-radius:6px; padding:8px;">{
+  "full_name": "Alice Kumar",
+  "email": "alice@test.com",
+  "password": "pass123",
+  "cgpa": 8.5,
+  "skills": "Python, Flask"
+}</pre>
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <div class="border rounded p-3 h-100" style="background:#f8f9fa;">
+          <p class="fw-semibold mb-1"><span class="badge bg-warning text-dark me-1">PUT</span> /api/drives/&lt;id&gt;</p>
+          <p class="text-muted small mb-1">Approve or reject a drive. Copy this into the body field:</p>
+          <pre class="mb-0" style="font-size:11px; background:#1e1e1e; color:#d4d4d4; border-radius:6px; padding:8px;">{ "status": "Approved" }
+
+{ "status": "Rejected" }
+
+{ "status": "Closed" }</pre>
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <div class="border rounded p-3 h-100" style="background:#f8f9fa;">
+          <p class="fw-semibold mb-1"><span class="badge bg-danger me-1">DELETE</span> /api/students/&lt;id&gt;</p>
+          <p class="text-muted small mb-2">Delete a student by ID. No body needed.</p>
+          <p class="fw-semibold mb-1 mt-2"><span class="badge bg-danger me-1">DELETE</span> /api/drives/&lt;id&gt;</p>
+          <p class="text-muted small mb-0">Delete a drive by ID. No body needed.</p>
+        </div>
+      </div>
+
+    </div>
+
+    {# ── Request builder ── #}
+    <p class="fw-semibold mb-2">Try it here:</p>
+
+    <div class="row g-2 mb-2">
+      <div class="col-auto">
+        <select id="method" class="form-select form-select-sm" onchange="toggleBody()">
+          <option value="GET">GET</option>
+          <option value="POST">POST</option>
+          <option value="PUT">PUT</option>
+          <option value="DELETE">DELETE</option>
+        </select>
+      </div>
+      <div class="col">
+        <input id="custom-url" class="form-control form-control-sm font-monospace"
+               placeholder="e.g. /api/stats   or   /api/drives/2   or   /api/students/1">
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-sm btn-dark" onclick="callCustom()">Send</button>
+      </div>
+    </div>
+
+    <div id="body-wrapper" class="mb-2 d-none">
+      <textarea id="req-body" class="form-control form-control-sm font-monospace" rows="4"
+                placeholder='Paste JSON body here, e.g. {"status": "Approved"}'></textarea>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center mb-1">
+      <small class="text-muted" id="api-label">Enter a URL and hit Send</small>
+      <button class="btn btn-sm btn-outline-secondary d-none" id="copy-btn" onclick="copyJson()">
+        <i class="bi bi-clipboard"></i> Copy
+      </button>
+    </div>
+    <pre id="api-output"
+         style="background:#1e1e1e; color:#d4d4d4; border-radius:8px;
+                padding:16px; min-height:80px; font-size:13px;
+                max-height:320px; overflow-y:auto; white-space:pre-wrap;">// response will appear here</pre>
+
+  </div>
+</div>
+
+<script>
+  function toggleBody() {
+    const method = document.getElementById('method').value;
+    document.getElementById('body-wrapper').classList.toggle('d-none', method === 'GET' || method === 'DELETE');
+  }
+
+  async function callCustom() {
+    const method = document.getElementById('method').value;
+    const url    = document.getElementById('custom-url').value.trim();
+    if (!url) { alert('Enter a URL first.'); return; }
+
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+
+    if (method === 'POST' || method === 'PUT') {
+      const raw = document.getElementById('req-body').value.trim();
+      if (raw) {
+        try { opts.body = raw; }   // send as-is, user already typed valid JSON
+        catch(e) { alert('Invalid JSON:\n' + e.message); return; }
+      }
+    }
+
+    document.getElementById('api-label').textContent = method + ' ' + url + ' …';
+    document.getElementById('api-output').textContent = 'Loading…';
+
+    try {
+      const res  = await fetch(url, opts);
+      const data = await res.json();
+      document.getElementById('api-output').textContent = JSON.stringify(data, null, 2);
+      document.getElementById('api-label').textContent  = method + ' ' + url + '  →  ' + res.status + ' ' + res.statusText;
+      document.getElementById('copy-btn').classList.remove('d-none');
+    } catch(e) {
+      document.getElementById('api-output').textContent = 'Error: ' + e.message;
+    }
+  }
+
+  function copyJson() {
+    navigator.clipboard.writeText(document.getElementById('api-output').textContent);
+  }
+</script>
+
+</div>
+{% endblock %}

@@ -1,0 +1,266 @@
+{% extends 'base.html' %}
+{% block title %}Applications — {{ drive.job_title }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4 px-4">
+
+  <!-- ── Header ────────────────────────────────────────────────────────── -->
+  <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
+    <div>
+      <h4 class="fw-bold mb-0">{{ drive.job_title }}</h4>
+      <p class="text-muted small mb-0">
+        {{ drive.company.company_name }}
+        {% if drive.location %} · {{ drive.location }}{% endif %}
+        · Deadline: {{ drive.application_deadline.strftime('%d %b %Y') if drive.application_deadline else '—' }}
+      </p>
+    </div>
+    <a href="{{ url_for('company.dashboard') }}" class="btn btn-sm btn-outline-secondary">
+      ← Dashboard
+    </a>
+  </div>
+
+  <!-- ── Tab navbar ────────────────────────────────────────────────────── -->
+  <ul class="nav nav-tabs mb-0" id="statusTabs">
+    {% set tabs = [('all','All'), ('Applied','Applied'), ('Shortlisted','Shortlisted'), ('Interview','Interview'), ('Selected','Selected'), ('Rejected','Rejected')] %}
+    {% for t_key, t_label in tabs %}
+    <li class="nav-item">
+      <a class="nav-link {{ 'active fw-semibold' if tab == t_key }}"
+         href="{{ url_for('company.drive_applications', drive_id=drive.id, tab=t_key, sort=sort) }}">
+        {{ t_label }}
+        <span class="badge ms-1
+          {% if t_key == 'all' %}bg-dark
+          {% elif t_key == 'Applied' %}bg-secondary
+          {% elif t_key == 'Shortlisted' %}bg-info text-dark
+          {% elif t_key == 'Interview' %}bg-warning text-dark
+          {% elif t_key == 'Selected' %}bg-success
+          {% elif t_key == 'Rejected' %}bg-danger
+          {% endif %}">
+          {{ counts[t_key] }}
+        </span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+
+  <!-- ── Main card ─────────────────────────────────────────────────────── -->
+  <div class="card" style="border-top-left-radius:0; border-top-right-radius:0;">
+    <div class="card-body p-0">
+
+      {% if apps %}
+      <!-- toolbar -->
+      <div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom bg-light flex-wrap gap-2">
+
+        <!-- Sort -->
+        <div class="d-flex align-items-center gap-2">
+          <span class="text-muted small">Sort by CGPA:</span>
+          <a href="{{ url_for('company.drive_applications', drive_id=drive.id, tab=tab, sort='cgpa_desc') }}"
+             class="btn btn-sm {{ 'btn-dark' if sort == 'cgpa_desc' else 'btn-outline-secondary' }}">
+            ↓ High first
+          </a>
+          <a href="{{ url_for('company.drive_applications', drive_id=drive.id, tab=tab, sort='cgpa_asc') }}"
+             class="btn btn-sm {{ 'btn-dark' if sort == 'cgpa_asc' else 'btn-outline-secondary' }}">
+            ↑ Low first
+          </a>
+          <a href="{{ url_for('company.drive_applications', drive_id=drive.id, tab=tab, sort='date') }}"
+             class="btn btn-sm {{ 'btn-dark' if sort == 'date' else 'btn-outline-secondary' }}">
+            Date
+          </a>
+        </div>
+
+        <!-- Bulk action -->
+        <form method="POST"
+              action="{{ url_for('company.bulk_update_status', drive_id=drive.id) }}"
+              id="bulkForm">
+          <input type="hidden" name="tab"  value="{{ tab }}">
+          <input type="hidden" name="sort" value="{{ sort }}">
+          <div class="d-flex align-items-center gap-2">
+            <span class="text-muted small" id="selectedCount">0 selected</span>
+            <select name="bulk_status" class="form-select form-select-sm" style="min-width:130px" required>
+              <option value="" disabled selected>Mark as…</option>
+              <option value="Applied">Applied</option>
+              <option value="Shortlisted">Shortlisted</option>
+              <option value="Interview">Interview</option>
+              <option value="Selected">Selected</option>
+              <option value="Rejected">Rejected</option>
+            </select>
+            <button type="submit" class="btn btn-sm btn-dark"
+                    onclick="return confirmBulk(event)">
+              Apply
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- table -->
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0" id="appsTable">
+          <thead class="table-light">
+            <tr>
+              <th style="width:36px">
+                <input type="checkbox" id="selectAll" class="form-check-input">
+              </th>
+              <th>#</th>
+              <th>Student</th>
+              <th>CGPA</th>
+              <th>Skills</th>
+              <th>Applied On</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in apps %}
+            <tr class="app-row"
+                data-href="{{ url_for('company.view_student_profile', student_id=a.student.id) }}"
+                style="cursor:pointer;">
+              <!-- checkbox cell — stop row-click propagation -->
+              <td onclick="event.stopPropagation()">
+                <input type="checkbox"
+                       class="form-check-input row-check"
+                       name="app_ids"
+                       value="{{ a.id }}"
+                       form="bulkForm">
+              </td>
+              <td class="text-muted small">{{ loop.index }}</td>
+              <td>
+                <div class="fw-semibold">{{ a.student.full_name }}</div>
+                <div class="text-muted small">{{ a.student.email }}</div>
+                {% if a.student.education %}
+                  <div class="text-muted small">{{ a.student.education }}</div>
+                {% endif %}
+              </td>
+              <td>
+                {% if a.student.cgpa %}
+                  <span class="badge bg-light text-dark border fw-semibold">
+                    {{ "%.2f"|format(a.student.cgpa) }}
+                  </span>
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td>
+                <div class="d-flex flex-wrap gap-1">
+                  {% if a.student.skills %}
+                    {% for sk in a.student.skills.split(',')[:4] %}
+                      <span class="badge bg-light text-dark border small">{{ sk.strip() }}</span>
+                    {% endfor %}
+                    {% if a.student.skills.split(',')|length > 4 %}
+                      <span class="badge bg-light text-muted border small">+{{ a.student.skills.split(',')|length - 4 }}</span>
+                    {% endif %}
+                  {% else %}
+                    <span class="text-muted small">—</span>
+                  {% endif %}
+                </div>
+              </td>
+              <td class="text-nowrap">{{ a.applied_at.strftime('%d %b %Y') }}</td>
+              <td>
+                {% if a.status == 'Selected' %}
+                  <span class="badge bg-success">Selected</span>
+                  <div class="mt-1 small fw-bold">
+                    {% if a.offer_status == 'Accepted' %}
+                      <span class="text-success"><i class="bi bi-check-circle"></i> Accepted</span>
+                    {% elif a.offer_status == 'Declined' %}
+                      <span class="text-danger"><i class="bi bi-x-circle"></i> Declined</span>
+                    {% else %}
+                      <span class="text-warning"><i class="bi bi-hourglass-split"></i> Pending</span>
+                    {% endif %}
+                  </div>
+                {% elif a.status == 'Rejected' %}
+                  <span class="badge bg-danger">Rejected</span>
+                {% elif a.status == 'Shortlisted' %}
+                  <span class="badge bg-info text-dark">Shortlisted</span>
+                {% elif a.status == 'Interview' %}
+                  <span class="badge bg-warning text-dark">Interview</span>
+                {% else %}
+                  <span class="badge bg-secondary">Applied</span>
+                {% endif %}
+              </td>
+              <!-- Actions cell — stop row-click propagation -->
+              <td onclick="event.stopPropagation()">
+                <div class="d-flex gap-1 flex-wrap">
+                  <!-- Resume -->
+                  {% if a.student.resume_path %}
+                  <a href="{{ url_for('company.view_resume', student_id=a.student.id) }}"
+                     target="_blank"
+                     class="btn btn-sm btn-outline-secondary"
+                     title="Open resume in new tab">
+                    <i class="bi bi-file-earmark-person"></i> Resume
+                  </a>
+                  {% endif %}
+                  <!-- Individual status update -->
+                  <form method="POST"
+                        action="{{ url_for('company.update_status', app_id=a.id) }}"
+                        class="d-flex gap-1">
+                    <input type="hidden" name="tab"  value="{{ tab }}">
+                    <input type="hidden" name="sort" value="{{ sort }}">
+                    <select name="status" class="form-select form-select-sm" style="min-width:110px">
+                      <option value="Applied"     {{ 'selected' if a.status == 'Applied' }}>Applied</option>
+                      <option value="Shortlisted" {{ 'selected' if a.status == 'Shortlisted' }}>Shortlisted</option>
+                      <option value="Interview"   {{ 'selected' if a.status == 'Interview' }}>Interview</option>
+                      <option value="Selected"    {{ 'selected' if a.status == 'Selected' }}>Selected</option>
+                      <option value="Rejected"    {{ 'selected' if a.status == 'Rejected' }}>Rejected</option>
+                    </select>
+                    <button class="btn btn-sm btn-dark">Save</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% else %}
+        <p class="text-muted p-4 mb-0 text-center">
+          No applications in this category.
+        </p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  // ── Row click → navigate to student profile ───────────────────────────────
+  document.querySelectorAll('.app-row').forEach(row => {
+    row.addEventListener('click', () => {
+      window.location.href = row.dataset.href;
+    });
+  });
+
+  // ── Select-all checkbox ───────────────────────────────────────────────────
+  const selectAll   = document.getElementById('selectAll');
+  const rowChecks   = document.querySelectorAll('.row-check');
+  const countLabel  = document.getElementById('selectedCount');
+
+  function updateCount() {
+    const n = document.querySelectorAll('.row-check:checked').length;
+    countLabel.textContent = n + ' selected';
+  }
+
+  if (selectAll) {
+    selectAll.addEventListener('change', () => {
+      rowChecks.forEach(c => c.checked = selectAll.checked);
+      updateCount();
+    });
+  }
+
+  rowChecks.forEach(c => c.addEventListener('change', () => {
+    selectAll.checked = [...rowChecks].every(c => c.checked);
+    updateCount();
+  }));
+
+  // ── Bulk confirm ──────────────────────────────────────────────────────────
+  function confirmBulk(e) {
+    const n = document.querySelectorAll('.row-check:checked').length;
+    if (n === 0) {
+      e.preventDefault();
+      alert('Select at least one candidate first.');
+      return false;
+    }
+    const status = document.querySelector('[name="bulk_status"]').value;
+    return confirm(`Mark ${n} candidate(s) as "${status}"?`);
+  }
+</script>
+{% endblock %}

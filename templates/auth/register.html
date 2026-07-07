@@ -1,0 +1,146 @@
+{% extends 'base.html' %}
+{% block title %}Register — Placement Portal{% endblock %}
+
+{% block content %}
+<div class="container mt-4 mb-5">
+  <div class="row justify-content-center">
+    <div class="col-md-7">
+      <div class="card p-4">
+
+        <div class="text-center mb-4">
+          {% if role == 'student' %}
+            <i class="bi bi-person-plus-fill fs-1 text-dark"></i>
+            <h4 class="mt-2 fw-bold">Student Registration</h4>
+          {% else %}
+            <i class="bi bi-building fs-1 text-dark"></i>
+            <h4 class="mt-2 fw-bold">Company Registration</h4>
+            <p class="text-muted small">Your account needs admin approval before you can log in.</p>
+          {% endif %}
+        </div>
+
+        <!-- ── STUDENT FORM ── -->
+        {% if role == 'student' %}
+        <form method="POST" action="{{ url_for('auth.register_student') }}" enctype="multipart/form-data">
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">Full Name <span class="text-danger">*</span></label>
+              <input type="text" class="form-control" name="full_name" required>
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">Email <span class="text-danger">*</span></label>
+              <input type="email" class="form-control" name="email" required>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">Password <span class="text-danger">*</span></label>
+              <input type="password" class="form-control" name="password" minlength="6" required>
+              <div class="form-text">Minimum 6 characters</div>
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">Confirm Password <span class="text-danger">*</span></label>
+              <input type="password" class="form-control" name="confirm_password" required>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">Phone</label>
+              <input type="text" class="form-control" name="phone" placeholder="10-digit number" pattern="[0-9]{10}" title="Please enter exactly 10 digits">
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">CGPA</label>
+              <input type="number" class="form-control" name="cgpa"
+                     step="0.01" min="0" max="10" placeholder="e.g. 8.5">
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Education</label>
+            <input type="text" class="form-control" name="education"
+                   placeholder="e.g. B.Tech CSE, IIT Madras, 2025">
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Skills</label>
+            <input type="text" class="form-control" name="skills"
+                   placeholder="e.g. Python, Flask, SQL, HTML">
+            <div class="form-text">Comma separated</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Upload Resume (PDF/DOC)</label>
+            <input type="file" class="form-control" name="resume" accept=".pdf,.doc,.docx">
+          </div>
+          
+          <button type="submit" class="btn btn-dark w-100 mt-2">
+            <i class="bi bi-person-check me-1"></i>Register as Student
+          </button>
+        </form>
+
+        <!-- ── COMPANY FORM ── -->
+        {% else %}
+        <form method="POST" action="{{ url_for('auth.register_company') }}">
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">Company Name <span class="text-danger">*</span></label>
+              <input type="text" class="form-control" name="company_name" required>
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">Email <span class="text-danger">*</span></label>
+              <input type="email" class="form-control" name="email" required>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">Password <span class="text-danger">*</span></label>
+              <input type="password" class="form-control" name="password" minlength="6" required>
+              <div class="form-text">Minimum 6 characters</div>
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">Confirm Password <span class="text-danger">*</span></label>
+              <input type="password" class="form-control" name="confirm_password" required>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">HR Contact Name</label>
+              <input type="text" class="form-control" name="hr_contact">
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">Industry</label>
+              <input type="text" class="form-control" name="industry"
+                     placeholder="e.g. Software, Finance">
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Website</label>
+            <input type="url" class="form-control" name="website"
+                   placeholder="https://yourcompany.com">
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Company Description</label>
+            <textarea class="form-control" name="description" rows="3"
+                      placeholder="Brief description of your company..."></textarea>
+          </div>
+          <button type="submit" class="btn btn-dark w-100 mt-2">
+            <i class="bi bi-building-check me-1"></i>Submit for Approval
+          </button>
+        </form>
+        {% endif %}
+
+        <hr class="my-3">
+        <p class="text-center text-muted small mb-1">
+          Already have an account? <a href="{{ url_for('auth.login') }}">Login here</a>
+        </p>
+        {% if role == 'student' %}
+          <p class="text-center text-muted small mb-0">
+            Are you a company? <a href="{{ url_for('auth.register_company') }}">Register as Company</a>
+          </p>
+        {% else %}
+          <p class="text-center text-muted small mb-0">
+            Are you a student? <a href="{{ url_for('auth.register_student') }}">Register as Student</a>
+          </p>
+        {% endif %}
+
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
