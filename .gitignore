@@ -1,0 +1,157 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing / Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.cache/
+
+# Type checking
+.mypy_cache/
+.pyre/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# =========================
+# Virtual Environments
+# =========================
+venv/
+.venv/
+env/
+ENV/
+
+# =========================
+# Flask
+# =========================
+instance/
+.flaskenv
+
+# User uploads
+static/uploads/*
+!static/uploads/.gitkeep
+
+# If storing resumes separately
+static/uploads/resumes/*
+!static/uploads/resumes/.gitkeep
+
+# Logs
+*.log
+logs/
+
+# =========================
+# Environment Variables
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# Database
+# =========================
+*.db
+*.sqlite
+*.sqlite3
+
+# SQLAlchemy migration cache
+*.db-journal
+
+# =========================
+# Redis
+# =========================
+dump.rdb
+appendonly.aof
+redis-data/
+
+# Celery (if added later)
+celerybeat-schedule
+
+# =========================
+# Frontend (Vue)
+# =========================
+node_modules/
+
+# Build output
+dist/
+coverage/
+
+# Vue cache
+.vue/
+.nuxt/
+.vite/
+.vscode-test/
+
+# npm / yarn / pnpm logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# =========================
+# IDEs
+# =========================
+.vscode/
+.idea/
+*.iml
+
+# =========================
+# OS Files
+# =========================
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# =========================
+# Temporary Files
+# =========================
+*.swp
+*.swo
+*~
+.tmp
+.temp
+
+# =========================
+# Secrets / Keys
+# =========================
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# =========================
+# Docker
+# =========================
+docker-compose.override.yml
+
+# =========================
+# Misc
+# =========================
+*.bak
+*.old
+*.orig
