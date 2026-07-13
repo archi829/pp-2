@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% block title %}My Notifications{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h4 class="fw-bold mb-0"><i class="bi bi-bell-fill me-2 text-primary"></i>My Notifications</h4>
+    <a href="{{ url_for('student.dashboard') }}" class="btn btn-sm btn-outline-secondary">← Dashboard</a>
+  </div>
+  
+  <div class="card">
+    <ul class="list-group list-group-flush">
+      {% if notifications %}
+        {% for n in notifications %}
+          <li class="list-group-item d-flex justify-content-between align-items-center p-3">
+            <span>
+              <i class="bi bi-info-circle text-primary me-2"></i> {{ n.message }}
+            </span>
+            <span class="text-muted small text-nowrap ms-3">
+              {{ n.created_at.strftime('%d %b %Y, %I:%M %p') }}
+            </span>
+          </li>
+        {% endfor %}
+      {% else %}
+        <li class="list-group-item text-muted p-4 text-center">
+            <i class="bi bi-bell-slash fs-1 d-block mb-2"></i>
+            You have no notifications history.
+        </li>
+      {% endif %}
+    </ul>
+  </div>
+</div>
+{% endblock %}
