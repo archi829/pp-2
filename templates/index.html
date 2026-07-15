@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Placement Portal</title>
+
+  <!-- Bootstrap 5 -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet"/>
+
+  <style>
+    body { background-color: #f4f6f9; }
+    .navbar-brand { font-weight: 700; letter-spacing: 0.5px; }
+    .card { border: none; box-shadow: 0 2px 12px rgba(0,0,0,0.07); border-radius: 12px; }
+    .btn { border-radius: 8px; }
+  </style>
+</head>
+<body>
+
+  <div id="app">
+    <router-view></router-view>
+  </div>
+
+  <!-- Bootstrap JS (navbar toggler, dropdowns) -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+  <!-- Vue 2 + Vue Router 3 + Axios (CDN, no build step) -->
+  <script src="https://cdn.jsdelivr.net/npm/vue@2.7.16/dist/vue.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vue-router@3.6.5/dist/vue-router.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.7.7/dist/axios.min.js"></script>
+
+  <!-- App config: axios instance + auth helpers (must load before components/router) -->
+  <script src="{{ url_for('static', filename='js/config.js') }}"></script>
+
+  <!-- Shared components -->
+  <script src="{{ url_for('static', filename='js/components/Login.js') }}"></script>
+
+  <!-- Admin components -->
+  <script src="{{ url_for('static', filename='js/components/AdminLayout.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/components/admin/AdminDashboard.js') }}"></script>
+
+  <!-- Router (references the components above) + app bootstrap -->
+  <script src="{{ url_for('static', filename='js/router.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
