@@ -1,5 +1,4 @@
 from flask import Blueprint, jsonify, request, send_from_directory, current_app
-from flask_jwt_extended import get_jwt_identity
 from routes.decorators import admin_required
 from models import db, Company, Student, PlacementDrive, Application
 from constants import ApprovalStatus, DriveStatus

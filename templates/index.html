@@ -34,12 +34,22 @@
   <!-- App config: axios instance + auth helpers (must load before components/router) -->
   <script src="{{ url_for('static', filename='js/config.js') }}"></script>
 
+  <!-- Shared UI primitives (self-registering global Vue components) -->
+  <script src="{{ url_for('static', filename='js/components/common/LoadingSpinner.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/components/common/ErrorAlert.js') }}"></script>
+
   <!-- Shared components -->
   <script src="{{ url_for('static', filename='js/components/Login.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/components/Register.js') }}"></script>
 
   <!-- Admin components -->
   <script src="{{ url_for('static', filename='js/components/AdminLayout.js') }}"></script>
   <script src="{{ url_for('static', filename='js/components/admin/AdminDashboard.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/components/admin/AdminCompanies.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/components/admin/AdminStudents.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/components/admin/AdminStudentDetail.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/components/admin/AdminDrives.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/components/admin/AdminApplications.js') }}"></script>
 
   <!-- Router (references the components above) + app bootstrap -->
   <script src="{{ url_for('static', filename='js/router.js') }}"></script>

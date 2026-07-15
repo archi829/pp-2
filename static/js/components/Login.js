@@ -105,6 +105,14 @@ const Login = {
     '          </button>' +
     '        </form>' +
     '' +
+    '        <hr class="my-3">' +
+    '        <p class="text-center text-muted small mb-1">' +
+    '          New student? <router-link to="/register?role=student">Register here</router-link>' +
+    '        </p>' +
+    '        <p class="text-center text-muted small mb-0">' +
+    '          New company? <router-link to="/register?role=company">Register here</router-link>' +
+    '        </p>' +
+    '' +
     '      </div>' +
     '    </div>' +
     '  </div>' +

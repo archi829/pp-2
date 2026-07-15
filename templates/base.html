@@ -36,41 +36,7 @@
 
         {% if current_user.is_authenticated %}
 
-          {% if current_user.__class__.__name__ == 'Admin' %}
-            <li class="nav-item">
-              <a class="nav-link" href="{{ url_for('admin.dashboard') }}">
-                <i class="bi bi-speedometer2"></i> Dashboard
-              </a>
-            </li>
-            <li class="nav-item dropdown">
-              <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                <i class="bi bi-people"></i> Manage
-              </a>
-              <ul class="dropdown-menu">
-                <li>
-                  <a class="dropdown-item" href="{{ url_for('admin.students') }}">
-                    <i class="bi bi-person me-2"></i>Students
-                  </a>
-                </li>
-                <li>
-                  <a class="dropdown-item" href="{{ url_for('admin.companies') }}">
-                    <i class="bi bi-building me-2"></i>Companies
-                  </a>
-                </li>
-                <li>
-                  <a class="dropdown-item" href="{{ url_for('admin.drives') }}">
-                    <i class="bi bi-briefcase me-2"></i>Drives
-                  </a>
-                </li>
-                <li>
-                  <a class="dropdown-item" href="{{ url_for('admin.applications') }}">
-                    <i class="bi bi-file-earmark-text me-2"></i>Applications
-                  </a>
-                </li>
-              </ul>
-            </li>
-
-          {% elif current_user.__class__.__name__ == 'Company' %}
+          {% if current_user.__class__.__name__ == 'Company' %}
             <li class="nav-item">
               <a class="nav-link" href="{{ url_for('company.dashboard') }}">
                 <i class="bi bi-speedometer2"></i> Dashboard

@@ -84,14 +84,9 @@ const AdminDashboard = {
     '<div class="container mt-4">' +
     '  <h4 class="mb-4"><i class="bi bi-speedometer2 me-2"></i>Admin Dashboard</h4>' +
     '' +
-    '  <div v-if="error" class="alert alert-danger alert-dismissible fade show" role="alert">' +
-    '    {{ error }}' +
-    '    <button type="button" class="btn-close" @click="error = \'\'"></button>' +
-    '  </div>' +
+    '  <error-alert :message="error" @dismiss="error = \'\'"></error-alert>' +
     '' +
-    '  <div v-if="loading" class="text-center py-5">' +
-    '    <div class="spinner-border text-dark" role="status"></div>' +
-    '  </div>' +
+    '  <loading-spinner v-if="loading"></loading-spinner>' +
     '' +
     '  <template v-else>' +
     '' +

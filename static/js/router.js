@@ -11,6 +11,7 @@ const ComingSoon = {
 
 const routes = [
   { path: '/login', component: Login },
+  { path: '/register', component: Register },
 
   {
     path: '/admin',
@@ -19,13 +20,21 @@ const routes = [
     redirect: '/admin/dashboard',
     children: [
       { path: 'dashboard', component: AdminDashboard },
-      { path: 'companies', component: ComingSoon },
-      { path: 'students', component: ComingSoon },
-      { path: 'students/:id', component: ComingSoon },
-      { path: 'drives', component: ComingSoon },
-      { path: 'applications', component: ComingSoon }
+      { path: 'companies', component: AdminCompanies },
+      { path: 'students', component: AdminStudents },
+      { path: 'students/:id', component: AdminStudentDetail },
+      { path: 'drives', component: AdminDrives },
+      { path: 'applications', component: AdminApplications }
     ]
   },
+
+  // Placeholders until Milestone 4 (company) / Milestone 5 (student) build these out.
+  // These MUST exist as real routes — without them, a company/student login or a
+  // student's auto-login-after-registration pushes to a path that only matches the
+  // catch-all '*' redirect to /login, which the guard below immediately bounces
+  // back to this same dashboard path, producing an infinite redirect loop.
+  { path: '/company/dashboard', component: ComingSoon, meta: { role: 'company' } },
+  { path: '/student/dashboard', component: ComingSoon, meta: { role: 'student' } },
 
   { path: '/', redirect: '/login' },
   { path: '*', redirect: '/login' }
@@ -55,8 +64,8 @@ router.beforeEach(function (to, from, next) {
     }
   }
 
-  // Already logged in and hitting /login or / → bounce to the right dashboard.
-  if ((to.path === '/login' || to.path === '/') && token && role) {
+  // Already logged in and hitting /login, /register, or / → bounce to the right dashboard.
+  if ((to.path === '/login' || to.path === '/register' || to.path === '/') && token && role) {
     return next(dashboardPathForRole(role));
   }
 
