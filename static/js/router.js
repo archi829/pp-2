@@ -28,12 +28,29 @@ const routes = [
     ]
   },
 
-  // Placeholders until Milestone 4 (company) / Milestone 5 (student) build these out.
-  // These MUST exist as real routes — without them, a company/student login or a
-  // student's auto-login-after-registration pushes to a path that only matches the
-  // catch-all '*' redirect to /login, which the guard below immediately bounces
-  // back to this same dashboard path, producing an infinite redirect loop.
-  { path: '/company/dashboard', component: ComingSoon, meta: { role: 'company' } },
+  {
+    path: '/company',
+    component: CompanyLayout,
+    meta: { role: 'company' },
+    redirect: '/company/dashboard',
+    children: [
+      { path: 'dashboard', component: CompanyDashboard },
+      { path: 'profile', component: CompanyProfile },
+      // Placeholders until later Milestone 4 steps build these out (Step 3: drives
+      // CRUD, Step 4: applicants + interviews). Nav links already point here, so
+      // these must exist as real child routes now.
+      { path: 'drives/new', component: CompanyDrives },
+      { path: 'drives/:id/edit', component: CompanyDrives },
+      { path: 'drives/:id/applications', component: ComingSoon },
+      { path: 'interviews', component: ComingSoon }
+    ]
+  },
+
+  // Placeholder until Milestone 5 (student) builds this out. MUST exist as a real
+  // route — without it, a student login or a student's auto-login-after-registration
+  // pushes to a path that only matches the catch-all '*' redirect to /login, which
+  // the guard below immediately bounces back to this same dashboard path, producing
+  // an infinite redirect loop.
   { path: '/student/dashboard', component: ComingSoon, meta: { role: 'student' } },
 
   { path: '/', redirect: '/login' },
