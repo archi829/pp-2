@@ -11,9 +11,14 @@ from constants import ApplicationStatus, DriveStatus, ApprovalStatus, InterviewS
 company_bp = Blueprint('company', __name__, url_prefix='/api/company')
 
 # Companies may move an application through any VALID_TRANSITIONS status except
-# 'Selected' — that one goes through /applications/<id>/select because it also
-# creates a Placement row.
-STATUS_TRANSITIONS = [s for s in ApplicationStatus.VALID_TRANSITIONS if s != ApplicationStatus.SELECTED]
+# 'Selected' and 'Interview Scheduled' — those two go through their own dedicated
+# endpoints (/applications/<id>/select and POST /interviews respectively) because
+# each one has to create a real record (a Placement, or an Interview with an
+# actual date/time) rather than just flipping a label with nothing behind it.
+STATUS_TRANSITIONS = [
+    s for s in ApplicationStatus.VALID_TRANSITIONS
+    if s not in (ApplicationStatus.SELECTED, ApplicationStatus.INTERVIEW_SCHEDULED)
+]
 
 
 # ── Serializers ────────────────────────────────────────────────────────────
@@ -96,6 +101,17 @@ def serialize_interview(i):
 
 def current_company():
     return Company.query.get(int(get_jwt_identity()))
+
+
+def _cancel_scheduled_interviews(application):
+    """Reject means the pipeline stopped — any interview still marked 'Scheduled'
+    for this application is now stale and should be auto-cancelled, otherwise it
+    sits forever on the combined /interviews page looking like it's still on.
+    Only touches interviews that are still Scheduled — never overwrites one a
+    company already manually marked Completed."""
+    for interview in application.interviews:
+        if interview.status == InterviewStatus.SCHEDULED:
+            interview.status = InterviewStatus.CANCELLED
 
 
 # ── Dashboard / Profile ──────────────────────────────────────────────────
@@ -337,10 +353,12 @@ def update_status(app_id):
     new_status = data.get('status')
 
     if new_status not in STATUS_TRANSITIONS:
-        return jsonify({'msg': "Invalid status. Use PUT /applications/<id>/select to mark a candidate 'Selected'."}), 400
+        return jsonify({'msg': "Invalid status. Use POST /interviews to move a candidate to 'Interview Scheduled' (requires a date/time), or PUT /applications/<id>/select for 'Selected'."}), 400
 
     if application.status != new_status:
         application.status = new_status
+        if new_status == ApplicationStatus.REJECTED:
+            _cancel_scheduled_interviews(application)
         db.session.add(Notification(
             user_type='student',
             user_id=application.student_id,
@@ -365,13 +383,15 @@ def bulk_update_status():
     if not app_ids:
         return jsonify({'msg': 'No candidates selected.'}), 400
     if new_status not in STATUS_TRANSITIONS:
-        return jsonify({'msg': "Invalid status. Use PUT /applications/<id>/select to mark a candidate 'Selected'."}), 400
+        return jsonify({'msg': "Invalid status. Use POST /interviews to move a candidate to 'Interview Scheduled' (requires a date/time), or PUT /applications/<id>/select for 'Selected'."}), 400
 
     updated_ids = []
     for aid in app_ids:
         app = Application.query.get(int(aid))
         if app and app.drive.company_id == company.id and app.status != new_status:
             app.status = new_status
+            if new_status == ApplicationStatus.REJECTED:
+                _cancel_scheduled_interviews(app)
             db.session.add(Notification(
                 user_type='student',
                 user_id=app.student_id,
@@ -472,6 +492,17 @@ def create_interview():
         status=InterviewStatus.SCHEDULED,
     )
     db.session.add(interview)
+
+    # Scheduling an interview implicitly moves the candidate into the
+    # 'Interview Scheduled' pipeline stage — unless they're already past that
+    # point (Selected/Rejected/Placed), in which case leave status alone.
+    # Without this, the drive-specific applicant tabs (which count by
+    # Application.status) never reflect interviews booked from this endpoint,
+    # even though the combined /interviews page (which reads the Interview
+    # table directly) correctly shows them.
+    if application.status not in (ApplicationStatus.SELECTED, ApplicationStatus.REJECTED, ApplicationStatus.PLACED):
+        application.status = ApplicationStatus.INTERVIEW_SCHEDULED
+
     db.session.add(Notification(
         user_type='student',
         user_id=application.student_id,
@@ -482,6 +513,7 @@ def create_interview():
 
     payload = serialize_interview(interview)
     payload['msg'] = 'Interview scheduled.'
+    payload['application_status'] = application.status
     return jsonify(payload), 201
 
 

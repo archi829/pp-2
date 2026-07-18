@@ -36,13 +36,11 @@ const routes = [
     children: [
       { path: 'dashboard', component: CompanyDashboard },
       { path: 'profile', component: CompanyProfile },
-      // Placeholders until later Milestone 4 steps build these out (Step 3: drives
-      // CRUD, Step 4: applicants + interviews). Nav links already point here, so
-      // these must exist as real child routes now.
       { path: 'drives/new', component: CompanyDrives },
       { path: 'drives/:id/edit', component: CompanyDrives },
-      { path: 'drives/:id/applications', component: ComingSoon },
-      { path: 'interviews', component: ComingSoon }
+      { path: 'drives/:id/applications', component: DriveApplicants },
+      { path: 'student/:id', component: CompanyStudentProfile },
+      { path: 'interviews', component: CompanyInterviews }
     ]
   },
 
