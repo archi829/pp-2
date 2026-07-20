@@ -1,247 +1,472 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request, send_from_directory, current_app, abort
-from flask_jwt_extended import get_jwt_identity
-from routes.decorators import student_required
-from models import db, Company, Student, PlacementDrive, Application, Notification
-from constants import ApplicationStatus, DriveStatus, OfferStatus
+"""
+routes/student.py — MAD2 pure JSON API for the student role.
+Replaces the Jinja2/Flask-Login version from MAD1.
+All endpoints return JSON; no render_template calls remain.
+"""
 import os
+
+from flask import Blueprint, jsonify, request, send_from_directory, current_app
+from flask_jwt_extended import get_jwt_identity
+from sqlalchemy.exc import IntegrityError
 from werkzeug.utils import secure_filename
 
-student_bp = Blueprint('student', __name__, url_prefix='/student')
+from routes.decorators import student_required
+from models import (
+    db, Student, PlacementDrive, Application,
+    Notification, Interview, Placement, Company
+)
+from constants import ApplicationStatus, DriveStatus, OfferStatus
+
+student_bp = Blueprint('student', __name__, url_prefix='/api/student')
 
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx'}
 
-def allowed_file(filename):
+
+def _allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+
+def current_student():
+    return Student.query.get(int(get_jwt_identity()))
+
+
+# ── Serializers ────────────────────────────────────────────────────────────────
+
+def serialize_student(s):
+    return {
+        'id': s.id,
+        'full_name': s.full_name,
+        'email': s.email,
+        'phone': s.phone,
+        'cgpa': s.cgpa,
+        'skills': s.skills,
+        'education': s.education,
+        'resume_path': s.resume_path,
+        'is_blacklisted': s.is_blacklisted,
+        'is_active': s.is_active,
+        'created_at': s.created_at.isoformat() if s.created_at else None,
+    }
+
+
+def serialize_drive(d):
+    return {
+        'id': d.id,
+        'company_id': d.company_id,
+        'company_name': d.company.company_name if d.company else None,
+        'job_title': d.job_title,
+        'job_description': d.job_description,
+        'eligibility_criteria': d.eligibility_criteria,
+        'required_skills': d.required_skills,
+        'salary_range': d.salary_range,
+        'location': d.location,
+        'application_deadline': (
+            d.application_deadline.isoformat() if d.application_deadline else None
+        ),
+        'status': d.status,
+        'created_at': d.created_at.isoformat() if d.created_at else None,
+    }
+
+
+def serialize_application(a):
+    return {
+        'id': a.id,
+        'drive_id': a.drive_id,
+        'job_title': a.drive.job_title if a.drive else None,
+        'company_name': (
+            a.drive.company.company_name if a.drive and a.drive.company else None
+        ),
+        'location': a.drive.location if a.drive else None,
+        'salary_range': a.drive.salary_range if a.drive else None,
+        'applied_at': a.applied_at.isoformat() if a.applied_at else None,
+        'status': a.status,
+        'offer_status': a.offer_status,
+        'cover_letter': a.cover_letter,
+        'student_notes': a.student_notes,
+    }
+
+
+def serialize_notification(n):
+    return {
+        'id': n.id,
+        'message': n.message,
+        'is_read': n.is_read,
+        'created_at': n.created_at.isoformat() if n.created_at else None,
+    }
+
+
+def serialize_interview(i):
+    """Student-facing interview serializer: shows job/company, not the student's own name."""
+    a = i.application
+    return {
+        'id': i.id,
+        'application_id': i.application_id,
+        'job_title': a.drive.job_title if a and a.drive else None,
+        'company_name': (
+            a.drive.company.company_name if a and a.drive and a.drive.company else None
+        ),
+        'scheduled_at': i.scheduled_at.isoformat() if i.scheduled_at else None,
+        'mode': i.mode,
+        'location_or_link': i.location_or_link,
+        'notes': i.notes,
+        'status': i.status,
+    }
+
+
+def serialize_placement(p):
+    company = Company.query.get(p.company_id)
+    drive = PlacementDrive.query.get(p.drive_id)
+    return {
+        'id': p.id,
+        'position': p.position,
+        'salary': p.salary,
+        'joining_date': p.joining_date.isoformat() if p.joining_date else None,
+        'offer_letter_path': p.offer_letter_path,
+        'placed_at': p.placed_at.isoformat() if p.placed_at else None,
+        'company_name': company.company_name if company else None,
+        'job_title': drive.job_title if drive else None,
+    }
+
+
+# ── Dashboard ──────────────────────────────────────────────────────────────────
 
 @student_bp.route('/dashboard')
 @student_required
 def dashboard():
-    current_user      = Student.query.get(int(get_jwt_identity()))
-    applied_drive_ids = [a.drive_id for a in current_user.applications]
+    student = current_student()
+    applied_drive_ids = [a.drive_id for a in student.applications]
+
+    available_count = PlacementDrive.query.filter_by(
+        status=DriveStatus.APPROVED
+    ).filter(
+        ~PlacementDrive.id.in_(applied_drive_ids)
+    ).count()
 
     available_drives = PlacementDrive.query.filter_by(
         status=DriveStatus.APPROVED
     ).filter(
         ~PlacementDrive.id.in_(applied_drive_ids)
-    ).order_by(PlacementDrive.created_at.desc()).all()
+    ).order_by(PlacementDrive.created_at.desc()).limit(5).all()
 
-    applications = Application.query.filter_by(
-        student_id=current_user.id
-    ).order_by(Application.applied_at.desc()).all()
+    all_apps = Application.query.filter_by(student_id=student.id).all()
+    recent_apps = sorted(all_apps, key=lambda a: a.applied_at or '', reverse=True)[:5]
 
     recent_notifs = Notification.query.filter_by(
         user_type='student',
-        user_id=current_user.id,
+        user_id=student.id,
         is_read=False
     ).order_by(Notification.created_at.desc()).limit(5).all()
 
-    return render_template('student/dashboard.html',
-                           student=current_user,
-                           available_drives=available_drives,
-                           applications=applications,
-                           recent_notifs=recent_notifs)
+    return jsonify({
+        'student': serialize_student(student),
+        'stats': {
+            'available_drives': available_count,
+            'applied': len(all_apps),
+            'shortlisted': sum(
+                1 for a in all_apps if a.status == ApplicationStatus.SHORTLISTED
+            ),
+            'selected': sum(
+                1 for a in all_apps if a.status == ApplicationStatus.SELECTED
+            ),
+        },
+        'available_drives': [serialize_drive(d) for d in available_drives],
+        'recent_applications': [serialize_application(a) for a in recent_apps],
+        'notifications': [serialize_notification(n) for n in recent_notifs],
+    }), 200
 
 
-@student_bp.route('/notifications')
+# ── Profile ────────────────────────────────────────────────────────────────────
+
+@student_bp.route('/profile')
 @student_required
-def notifications():
-    current_user = Student.query.get(int(get_jwt_identity()))
-    all_notifs   = Notification.query.filter_by(
-        user_type='student',
-        user_id=current_user.id
-    ).order_by(Notification.created_at.desc()).all()
+def get_profile():
+    return jsonify(serialize_student(current_student())), 200
 
-    for n in all_notifs:
-        n.is_read = True
+
+@student_bp.route('/profile', methods=['PUT'])
+@student_required
+def update_profile():
+    student = current_student()
+    data = request.get_json(silent=True) or {}
+
+    # email is intentionally not editable.
+    if 'full_name' in data:
+        student.full_name = (data.get('full_name') or '').strip()
+    if 'phone' in data:
+        student.phone = (data.get('phone') or '').strip()
+    if 'skills' in data:
+        student.skills = (data.get('skills') or '').strip()
+    if 'education' in data:
+        student.education = (data.get('education') or '').strip()
+    if 'cgpa' in data:
+        raw = data.get('cgpa')
+        if raw is None or raw == '':
+            student.cgpa = None
+        else:
+            try:
+                cgpa = float(raw)
+                if not (0 <= cgpa <= 10):
+                    raise ValueError
+                student.cgpa = cgpa
+            except (ValueError, TypeError):
+                return jsonify({'msg': 'CGPA must be a number between 0 and 10.'}), 400
+
+    db.session.commit()
+    payload = serialize_student(student)
+    payload['msg'] = 'Profile updated.'
+    return jsonify(payload), 200
+
+
+@student_bp.route('/profile/resume', methods=['POST'])
+@student_required
+def upload_resume():
+    student = current_student()
+    file = request.files.get('resume')
+    if not file or not file.filename:
+        return jsonify({'msg': 'No file provided.'}), 400
+    if not _allowed_file(file.filename):
+        return jsonify({'msg': 'Only PDF, DOC, DOCX files are allowed.'}), 400
+
+    filename = secure_filename(f"student_{student.id}_{file.filename}")
+    upload_folder = current_app.config['UPLOAD_FOLDER']
+    os.makedirs(upload_folder, exist_ok=True)
+    file.save(os.path.join(upload_folder, filename))
+    student.resume_path = filename
     db.session.commit()
 
-    return render_template('student/notifications.html', notifications=all_notifs)
+    payload = serialize_student(student)
+    payload['msg'] = 'Resume uploaded successfully.'
+    return jsonify(payload), 200
 
+
+@student_bp.route('/resume')
+@student_required
+def download_resume():
+    student = current_student()
+    if not student.resume_path:
+        return jsonify({'msg': 'No resume uploaded yet.'}), 404
+    return send_from_directory(
+        current_app.config['UPLOAD_FOLDER'],
+        os.path.basename(student.resume_path),
+        as_attachment=False
+    )
+
+
+# ── Drives ─────────────────────────────────────────────────────────────────────
 
 @student_bp.route('/drives')
 @student_required
-def drives():
-    current_user      = Student.query.get(int(get_jwt_identity()))
-    q                 = request.args.get('q', '').strip()
-    applied_drive_ids = [a.drive_id for a in current_user.applications]
+def list_drives():
+    student = current_student()
+    q = (request.args.get('q') or '').strip()
+    applied_drive_ids = [a.drive_id for a in student.applications]
 
     query = PlacementDrive.query.filter_by(status=DriveStatus.APPROVED)
     if q:
-        like  = f'%{q}%'
+        like = f'%{q}%'
         query = query.join(Company).filter(
             db.or_(
                 PlacementDrive.job_title.ilike(like),
                 PlacementDrive.required_skills.ilike(like),
                 PlacementDrive.location.ilike(like),
-                Company.company_name.ilike(like)
+                Company.company_name.ilike(like),
             )
         )
 
     drives = query.order_by(PlacementDrive.created_at.desc()).all()
-    return render_template('student/drives.html',
-                           drives=drives,
-                           applied_drive_ids=applied_drive_ids,
-                           q=q)
+    return jsonify({
+        'drives': [serialize_drive(d) for d in drives],
+        'applied_drive_ids': applied_drive_ids,
+    }), 200
 
 
-@student_bp.route('/drive/<int:drive_id>')
+@student_bp.route('/drives/<int:drive_id>')
 @student_required
-def drive_detail(drive_id):
-    current_user = Student.query.get(int(get_jwt_identity()))
-    drive        = PlacementDrive.query.get_or_404(drive_id)
-
+def get_drive(drive_id):
+    student = current_student()
+    drive = PlacementDrive.query.get_or_404(drive_id)
     if drive.status != DriveStatus.APPROVED:
-        flash('This drive is not available.', 'warning')
-        return redirect(url_for('student.drives'))
-
-    already_applied = Application.query.filter_by(
-        student_id=current_user.id,
-        drive_id=drive_id
-    ).first()
-
-    return render_template('student/drive_detail.html',
-                           drive=drive,
-                           already_applied=already_applied)
-
-
-@student_bp.route('/drive/<int:drive_id>/apply', methods=['POST'])
-@student_required
-def apply(drive_id):
-    current_user = Student.query.get(int(get_jwt_identity()))
-    drive        = PlacementDrive.query.get_or_404(drive_id)
-
-    if drive.status != DriveStatus.APPROVED:
-        flash('This drive is not open for applications.', 'warning')
-        return redirect(url_for('student.drives'))
-
-    if current_user.is_blacklisted:
-        flash('You cannot apply while blacklisted.', 'danger')
-        return redirect(url_for('student.drives'))
+        return jsonify({'msg': 'This drive is not available.'}), 404
 
     existing = Application.query.filter_by(
-        student_id=current_user.id,
+        student_id=student.id,
         drive_id=drive_id
     ).first()
-    if existing:
-        flash('You have already applied for this drive.', 'warning')
-        return redirect(url_for('student.drives'))
+
+    payload = serialize_drive(drive)
+    payload['already_applied'] = serialize_application(existing) if existing else None
+    return jsonify(payload), 200
+
+
+# ── Applications ───────────────────────────────────────────────────────────────
+
+@student_bp.route('/applications', methods=['POST'])
+@student_required
+def apply():
+    student = current_student()
+    data = request.get_json(silent=True) or {}
+    drive_id = data.get('drive_id')
+    if not drive_id:
+        return jsonify({'msg': 'drive_id is required.'}), 400
+
+    drive = PlacementDrive.query.get(drive_id)
+    if not drive:
+        return jsonify({'msg': 'Drive not found.'}), 404
+    if drive.status != DriveStatus.APPROVED:
+        return jsonify({'msg': 'This drive is not open for applications.'}), 400
 
     application = Application(
-        student_id   = current_user.id,
-        drive_id     = drive_id,
-        cover_letter = request.form.get('cover_letter', '').strip(),
-        status       = ApplicationStatus.APPLIED
+        student_id=student.id,
+        drive_id=drive_id,
+        cover_letter=(data.get('cover_letter') or '').strip(),
+        status=ApplicationStatus.APPLIED,
     )
     db.session.add(application)
-    db.session.commit()
-    flash(f'Successfully applied for {drive.job_title}!', 'success')
-    return redirect(url_for('student.history'))
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({'msg': 'You have already applied for this drive.'}), 409
+
+    payload = serialize_application(application)
+    payload['msg'] = f'Successfully applied for {drive.job_title}!'
+    return jsonify(payload), 201
 
 
-@student_bp.route('/history')
+@student_bp.route('/applications')
 @student_required
-def history():
-    current_user = Student.query.get(int(get_jwt_identity()))
-    applications = Application.query.filter_by(
-        student_id=current_user.id
+def list_applications():
+    student = current_student()
+    apps = Application.query.filter_by(
+        student_id=student.id
     ).order_by(Application.applied_at.desc()).all()
 
-    status_counts = {
-        ApplicationStatus.APPLIED:              sum(1 for a in applications if a.status == ApplicationStatus.APPLIED),
-        ApplicationStatus.SHORTLISTED:          sum(1 for a in applications if a.status == ApplicationStatus.SHORTLISTED),
-        ApplicationStatus.INTERVIEW_SCHEDULED:  sum(1 for a in applications if a.status == ApplicationStatus.INTERVIEW_SCHEDULED),
-        ApplicationStatus.SELECTED:             sum(1 for a in applications if a.status == ApplicationStatus.SELECTED),
-        ApplicationStatus.REJECTED:             sum(1 for a in applications if a.status == ApplicationStatus.REJECTED),
-    }
+    counts = {s: 0 for s in ApplicationStatus.ALL}
+    for a in apps:
+        if a.status in counts:
+            counts[a.status] += 1
 
-    return render_template('student/history.html',
-                           applications=applications,
-                           status_counts=status_counts)
+    return jsonify({
+        'applications': [serialize_application(a) for a in apps],
+        'status_counts': counts,
+        'total': len(apps),
+    }), 200
 
 
-@student_bp.route('/application/<int:app_id>/note', methods=['POST'])
+@student_bp.route('/applications/<int:app_id>')
+@student_required
+def get_application(app_id):
+    student = current_student()
+    app = Application.query.get_or_404(app_id)
+    if app.student_id != student.id:
+        return jsonify({'msg': 'Not found.'}), 404
+    return jsonify(serialize_application(app)), 200
+
+
+@student_bp.route('/applications/<int:app_id>/note', methods=['PUT'])
 @student_required
 def save_note(app_id):
-    current_user = Student.query.get(int(get_jwt_identity()))
-    app          = Application.query.get_or_404(app_id)
-    if app.student_id != current_user.id:
-        flash('Access denied.', 'danger')
-        return redirect(url_for('student.history'))
+    student = current_student()
+    app = Application.query.get_or_404(app_id)
+    if app.student_id != student.id:
+        return jsonify({'msg': 'Not found.'}), 404
 
-    app.student_notes = request.form.get('student_notes', '').strip()
+    data = request.get_json(silent=True) or {}
+    app.student_notes = (data.get('student_notes') or '').strip()
     db.session.commit()
-    flash('Personal note updated.', 'success')
-    return redirect(url_for('student.history'))
+
+    payload = serialize_application(app)
+    payload['msg'] = 'Note saved.'
+    return jsonify(payload), 200
 
 
-@student_bp.route('/application/<int:app_id>/offer', methods=['POST'])
+@student_bp.route('/applications/<int:app_id>/offer', methods=['PUT'])
 @student_required
 def respond_offer(app_id):
-    current_user = Student.query.get(int(get_jwt_identity()))
-    app          = Application.query.get_or_404(app_id)
-    if app.student_id != current_user.id or app.status != ApplicationStatus.SELECTED:
-        flash('Invalid action.', 'danger')
-        return redirect(url_for('student.dashboard'))
+    student = current_student()
+    app = Application.query.get_or_404(app_id)
+    if app.student_id != student.id:
+        return jsonify({'msg': 'Not found.'}), 404
+    if app.status != ApplicationStatus.SELECTED:
+        return jsonify({'msg': 'Only Selected applications can respond to offers.'}), 400
 
-    action = request.form.get('action')
+    data = request.get_json(silent=True) or {}
+    action = data.get('action')
     if action == 'accept':
         app.offer_status = OfferStatus.ACCEPTED
-        flash('Congratulations! You have accepted the offer.', 'success')
+        msg = 'Congratulations! You have accepted the offer.'
     elif action == 'reject':
         app.offer_status = OfferStatus.DECLINED
-        flash('You have declined the offer.', 'warning')
+        msg = 'You have declined the offer.'
+    else:
+        return jsonify({'msg': 'action must be "accept" or "reject".'}), 400
 
     db.session.commit()
-    return redirect(url_for('student.dashboard'))
+    payload = serialize_application(app)
+    payload['msg'] = msg
+    return jsonify(payload), 200
 
 
-@student_bp.route('/profile', methods=['GET', 'POST'])
+# ── Notifications ──────────────────────────────────────────────────────────────
+
+@student_bp.route('/notifications')
 @student_required
-def profile():
-    current_user = Student.query.get(int(get_jwt_identity()))
-    if request.method == 'POST':
-        current_user.full_name = request.form.get('full_name', '').strip()
-        current_user.phone     = request.form.get('phone', '').strip()
-        current_user.skills    = request.form.get('skills', '').strip()
-        current_user.education = request.form.get('education', '').strip()
+def list_notifications():
+    student = current_student()
+    notifs = Notification.query.filter_by(
+        user_type='student',
+        user_id=student.id
+    ).order_by(Notification.created_at.desc()).all()
 
-        cgpa = request.form.get('cgpa', '')
-        try:
-            current_user.cgpa = float(cgpa) if cgpa else None
-            if current_user.cgpa is not None and not (0 <= current_user.cgpa <= 10):
-                raise ValueError
-        except ValueError:
-            flash('CGPA must be between 0 and 10.', 'danger')
-            return render_template('student/profile.html', student=current_user)
+    # Mark-as-read side effect preserved from MAD1 behaviour.
+    for n in notifs:
+        n.is_read = True
+    db.session.commit()
 
-        file = request.files.get('resume')
-        if file and file.filename:
-            if allowed_file(file.filename):
-                filename = secure_filename(f"student_{current_user.id}_{file.filename}")
-                upload_folder = current_app.config['UPLOAD_FOLDER']
-                os.makedirs(upload_folder, exist_ok=True)
-                file.save(os.path.join(upload_folder, filename))
-                current_user.resume_path = filename
-            else:
-                flash('Only PDF, DOC, DOCX files allowed.', 'danger')
-                return render_template('student/profile.html', student=current_user)
-
-        db.session.commit()
-        flash('Profile updated successfully.', 'success')
-        return redirect(url_for('student.profile'))
-    return render_template('student/profile.html', student=current_user)
+    return jsonify([serialize_notification(n) for n in notifs]), 200
 
 
-@student_bp.route('/resume/download')
+# ── Interviews ─────────────────────────────────────────────────────────────────
+
+@student_bp.route('/interviews')
 @student_required
-def download_own_resume():
-    current_user = Student.query.get(int(get_jwt_identity()))
-    if not current_user.resume_path:
-        flash('You have not uploaded a resume yet.', 'warning')
-        return redirect(url_for('student.profile'))
+def list_interviews():
+    student = current_student()
+    interviews = (
+        Interview.query
+        .join(Application)
+        .filter(Application.student_id == student.id)
+        .order_by(Interview.scheduled_at)
+        .all()
+    )
+    return jsonify([serialize_interview(i) for i in interviews]), 200
+
+
+# ── Placements ─────────────────────────────────────────────────────────────────
+
+@student_bp.route('/placements')
+@student_required
+def list_placements():
+    student = current_student()
+    placements = (
+        Placement.query
+        .filter_by(student_id=student.id)
+        .order_by(Placement.placed_at.desc())
+        .all()
+    )
+    return jsonify([serialize_placement(p) for p in placements]), 200
+
+
+@student_bp.route('/placements/<int:placement_id>/offer-letter')
+@student_required
+def download_offer_letter(placement_id):
+    student = current_student()
+    placement = Placement.query.get_or_404(placement_id)
+    if placement.student_id != student.id:
+        return jsonify({'msg': 'Not found.'}), 404
+    if not placement.offer_letter_path:
+        return jsonify({'msg': 'Offer letter not available yet.'}), 404
     return send_from_directory(
         current_app.config['UPLOAD_FOLDER'],
-        os.path.basename(current_user.resume_path),
-        as_attachment=False
+        os.path.basename(placement.offer_letter_path),
+        as_attachment=True
     )

@@ -44,12 +44,22 @@ const routes = [
     ]
   },
 
-  // Placeholder until Milestone 5 (student) builds this out. MUST exist as a real
-  // route — without it, a student login or a student's auto-login-after-registration
-  // pushes to a path that only matches the catch-all '*' redirect to /login, which
-  // the guard below immediately bounces back to this same dashboard path, producing
-  // an infinite redirect loop.
-  { path: '/student/dashboard', component: ComingSoon, meta: { role: 'student' } },
+  {
+    path: '/student',
+    component: StudentLayout,
+    meta: { role: 'student' },
+    redirect: '/student/dashboard',
+    children: [
+      { path: 'dashboard',      component: StudentDashboard },
+      { path: 'profile',        component: StudentProfile },
+      { path: 'drives',         component: BrowseDrives },
+      { path: 'drives/:id',     component: DriveDetail },
+      { path: 'applications',   component: StudentApplications },
+      { path: 'interviews',     component: StudentInterviews },
+      { path: 'placements',     component: StudentPlacements },
+      { path: 'notifications',  component: StudentNotifications }
+    ]
+  },
 
   { path: '/', redirect: '/login' },
   { path: '*', redirect: '/login' }
