@@ -13,13 +13,36 @@ from werkzeug.utils import secure_filename
 from routes.decorators import student_required
 from models import (
     db, Student, PlacementDrive, Application,
-    Notification, Interview, Placement, Company
+    Notification, Interview, Placement, Company, ApplicationStatusLog
 )
 from constants import ApplicationStatus, DriveStatus, OfferStatus
 
 student_bp = Blueprint('student', __name__, url_prefix='/api/student')
 
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx'}
+
+
+def _log_status(application_id, from_status, to_status, role, user_id, note=None):
+    """Write one ApplicationStatusLog row before db.session.commit()."""
+    db.session.add(ApplicationStatusLog(
+        application_id=application_id,
+        from_status=from_status,
+        to_status=to_status,
+        changed_by_role=role,
+        changed_by_id=user_id,
+        note=note,
+    ))
+
+
+def _serialize_log(entry):
+    return {
+        'id':              entry.id,
+        'from_status':     entry.from_status,
+        'to_status':       entry.to_status,
+        'changed_by_role': entry.changed_by_role,
+        'note':            entry.note,
+        'changed_at':      entry.changed_at.isoformat() if entry.changed_at else None,
+    }
 
 
 def _allowed_file(filename):
@@ -322,6 +345,8 @@ def apply():
     )
     db.session.add(application)
     try:
+        db.session.flush()  # populate application.id before writing the log row
+        _log_status(application.id, None, ApplicationStatus.APPLIED, 'student', student.id)
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
@@ -360,6 +385,16 @@ def get_application(app_id):
     if app.student_id != student.id:
         return jsonify({'msg': 'Not found.'}), 404
     return jsonify(serialize_application(app)), 200
+
+
+@student_bp.route('/applications/<int:app_id>/history')
+@student_required
+def application_history(app_id):
+    student = current_student()
+    app = Application.query.get_or_404(app_id)
+    if app.student_id != student.id:
+        return jsonify({'msg': 'Not found.'}), 404
+    return jsonify([_serialize_log(e) for e in app.status_log]), 200
 
 
 @student_bp.route('/applications/<int:app_id>/note', methods=['PUT'])

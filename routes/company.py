@@ -5,20 +5,46 @@ from flask import Blueprint, jsonify, request, send_from_directory, current_app
 from flask_jwt_extended import get_jwt_identity
 
 from routes.decorators import company_required
-from models import db, Company, PlacementDrive, Application, Student, Notification, Interview, Placement
+from models import db, Company, PlacementDrive, Application, Student, Notification, Interview, Placement, ApplicationStatusLog
 from constants import ApplicationStatus, DriveStatus, ApprovalStatus, InterviewStatus
 
 company_bp = Blueprint('company', __name__, url_prefix='/api/company')
 
-# Companies may move an application through any VALID_TRANSITIONS status except
-# 'Selected' and 'Interview Scheduled' — those two go through their own dedicated
-# endpoints (/applications/<id>/select and POST /interviews respectively) because
-# each one has to create a real record (a Placement, or an Interview with an
-# actual date/time) rather than just flipping a label with nothing behind it.
-STATUS_TRANSITIONS = [
-    s for s in ApplicationStatus.VALID_TRANSITIONS
-    if s not in (ApplicationStatus.SELECTED, ApplicationStatus.INTERVIEW_SCHEDULED)
-]
+# Forward-only state machine for the bare status dropdown.
+# 'Interview Scheduled' and 'Selected' are gated behind their own endpoints
+# (POST /interviews and PUT /applications/<id>/select) because each requires a
+# real record, not just a label flip.  The dropdown can only Shortlist or Reject.
+FORWARD_TRANSITIONS = {
+    ApplicationStatus.APPLIED:             {ApplicationStatus.SHORTLISTED, ApplicationStatus.REJECTED},
+    ApplicationStatus.SHORTLISTED:         {ApplicationStatus.REJECTED},
+    ApplicationStatus.INTERVIEW_SCHEDULED: {ApplicationStatus.REJECTED},
+    ApplicationStatus.SELECTED:            set(),   # terminal via bare dropdown
+    ApplicationStatus.REJECTED:            set(),   # terminal
+    ApplicationStatus.PLACED:             set(),   # terminal
+}
+
+
+def _log_status(application_id, from_status, to_status, role, user_id, note=None):
+    """Write one ApplicationStatusLog row. Must be called before db.session.commit()."""
+    db.session.add(ApplicationStatusLog(
+        application_id=application_id,
+        from_status=from_status,
+        to_status=to_status,
+        changed_by_role=role,
+        changed_by_id=user_id,
+        note=note,
+    ))
+
+
+def _serialize_log(entry):
+    return {
+        'id':              entry.id,
+        'from_status':     entry.from_status,
+        'to_status':       entry.to_status,
+        'changed_by_role': entry.changed_by_role,
+        'note':            entry.note,
+        'changed_at':      entry.changed_at.isoformat() if entry.changed_at else None,
+    }
 
 
 # ── Serializers ────────────────────────────────────────────────────────────
@@ -351,14 +377,31 @@ def update_status(app_id):
 
     data = request.get_json(silent=True) or {}
     new_status = data.get('status')
+    note = (data.get('note') or '').strip() or None
 
-    if new_status not in STATUS_TRANSITIONS:
-        return jsonify({'msg': "Invalid status. Use POST /interviews to move a candidate to 'Interview Scheduled' (requires a date/time), or PUT /applications/<id>/select for 'Selected'."}), 400
+    # Same status — nothing to do.
+    if application.status == new_status:
+        payload = serialize_application(application)
+        payload['msg'] = 'Status unchanged (already set to this value).'
+        return jsonify(payload), 200
+
+    allowed = FORWARD_TRANSITIONS.get(application.status, set())
+    if new_status not in allowed:
+        if not allowed:
+            return jsonify({
+                'msg': f"'{application.status}' is a terminal status — it cannot be changed via this endpoint."
+            }), 400
+        return jsonify({
+            'msg': (f"Cannot move from '{application.status}' to '{new_status}'. "
+                    f"Allowed transitions: {sorted(allowed)}.")
+        }), 400
 
     if application.status != new_status:
+        old_status = application.status
         application.status = new_status
         if new_status == ApplicationStatus.REJECTED:
             _cancel_scheduled_interviews(application)
+        _log_status(application.id, old_status, new_status, 'company', company.id, note)
         db.session.add(Notification(
             user_type='student',
             user_id=application.student_id,
@@ -382,16 +425,32 @@ def bulk_update_status():
 
     if not app_ids:
         return jsonify({'msg': 'No candidates selected.'}), 400
-    if new_status not in STATUS_TRANSITIONS:
-        return jsonify({'msg': "Invalid status. Use POST /interviews to move a candidate to 'Interview Scheduled' (requires a date/time), or PUT /applications/<id>/select for 'Selected'."}), 400
+    # Validate the target status is a known forward-reachable value
+    all_reachable = set().union(*FORWARD_TRANSITIONS.values())
+    if new_status not in all_reachable:
+        return jsonify({'msg': (
+            "Invalid status. Use POST /interviews for 'Interview Scheduled' "
+            "or PUT /applications/<id>/select for 'Selected'."
+        )}), 400
 
     updated_ids = []
+    skipped_ids = []   # applications where the transition is not allowed from their current state
+    note = (data.get('note') or '').strip() or None
+
     for aid in app_ids:
         app = Application.query.get(int(aid))
-        if app and app.drive.company_id == company.id and app.status != new_status:
+        if not app or app.drive.company_id != company.id:
+            continue
+        allowed = FORWARD_TRANSITIONS.get(app.status, set())
+        if new_status not in allowed:
+            skipped_ids.append(int(aid))
+            continue
+        if app.status != new_status:
+            old_status = app.status
             app.status = new_status
             if new_status == ApplicationStatus.REJECTED:
                 _cancel_scheduled_interviews(app)
+            _log_status(app.id, old_status, new_status, 'company', company.id, note)
             db.session.add(Notification(
                 user_type='student',
                 user_id=app.student_id,
@@ -401,8 +460,11 @@ def bulk_update_status():
             updated_ids.append(app.id)
 
     db.session.commit()
-    return jsonify({'msg': f'{len(updated_ids)} candidate(s) marked as {new_status}.',
-                     'updated_ids': updated_ids, 'new_status': new_status}), 200
+    msg = f'{len(updated_ids)} candidate(s) marked as {new_status}.'
+    if skipped_ids:
+        msg += f' {len(skipped_ids)} skipped (transition not permitted from their current status).'
+    return jsonify({'msg': msg, 'updated_ids': updated_ids,
+                    'skipped_ids': skipped_ids, 'new_status': new_status}), 200
 
 
 @company_bp.route('/applications/<int:app_id>/select', methods=['PUT'])
@@ -426,7 +488,10 @@ def select_application(app_id):
             return jsonify({'msg': 'Invalid date format for joining_date.'}), 400
 
     status_changed = application.status != ApplicationStatus.SELECTED
+    old_status = application.status
     application.status = ApplicationStatus.SELECTED
+    if status_changed:
+        _log_status(application.id, old_status, ApplicationStatus.SELECTED, 'company', company.id)
 
     placement = Placement.query.filter_by(
         student_id=application.student_id,
@@ -450,7 +515,7 @@ def select_application(app_id):
             user_type='student',
             user_id=application.student_id,
             message=(f"Congratulations! You have been selected for {application.drive.job_title} "
-                     f"at {application.drive.company.company_name}."),
+                     f"at {application.drive.company.company_name}. Please check your offer."),
         ))
 
     db.session.commit()
@@ -501,7 +566,9 @@ def create_interview():
     # even though the combined /interviews page (which reads the Interview
     # table directly) correctly shows them.
     if application.status not in (ApplicationStatus.SELECTED, ApplicationStatus.REJECTED, ApplicationStatus.PLACED):
+        old_status = application.status
         application.status = ApplicationStatus.INTERVIEW_SCHEDULED
+        _log_status(application.id, old_status, ApplicationStatus.INTERVIEW_SCHEDULED, 'company', company.id)
 
     db.session.add(Notification(
         user_type='student',
@@ -590,6 +657,16 @@ def view_student_profile(student_id):
     payload = serialize_student_brief(student)
     payload['applications'] = [serialize_application(a) for a in applications]
     return jsonify(payload), 200
+
+
+@company_bp.route('/applications/<int:app_id>/history')
+@company_required
+def application_history(app_id):
+    company = current_company()
+    application = Application.query.get_or_404(app_id)
+    if application.drive.company_id != company.id:
+        return jsonify({'msg': 'Application not found.'}), 404
+    return jsonify([_serialize_log(e) for e in application.status_log]), 200
 
 
 @company_bp.route('/student/<int:student_id>/resume')

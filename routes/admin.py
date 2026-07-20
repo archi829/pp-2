@@ -83,6 +83,18 @@ def serialize_application(a):
         'company_name': a.drive.company.company_name if a.drive and a.drive.company else None,
         'applied_at': a.applied_at.isoformat() if a.applied_at else None,
         'status': a.status,
+        'offer_status': a.offer_status,
+    }
+
+
+def serialize_log(entry):
+    return {
+        'id':              entry.id,
+        'from_status':     entry.from_status,
+        'to_status':       entry.to_status,
+        'changed_by_role': entry.changed_by_role,
+        'note':            entry.note,
+        'changed_at':      entry.changed_at.isoformat() if entry.changed_at else None,
     }
 
 
@@ -375,8 +387,22 @@ def download_student_resume(student_id):
 @admin_bp.route('/applications')
 @admin_required
 def applications():
+    include_history = request.args.get('history') == '1'
     apps = Application.query.order_by(Application.applied_at.desc()).all()
-    return jsonify([serialize_application(a) for a in apps]), 200
+    result = []
+    for a in apps:
+        row = serialize_application(a)
+        if include_history:
+            row['status_log'] = [serialize_log(e) for e in a.status_log]
+        result.append(row)
+    return jsonify(result), 200
+
+
+@admin_bp.route('/applications/<int:app_id>/history')
+@admin_required
+def application_history(app_id):
+    app = Application.query.get_or_404(app_id)
+    return jsonify([serialize_log(e) for e in app.status_log]), 200
 
 
 # ── Search ───────────────────────────────────────────────────────────────

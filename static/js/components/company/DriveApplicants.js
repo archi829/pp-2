@@ -32,7 +32,12 @@ const DriveApplicants = {
       showInterviewModal: false,
       interviewApp: null,
       interviewForm: { scheduled_at: '', mode: 'Online', location_or_link: '', notes: '' },
-      interviewSaving: false
+      interviewSaving: false,
+
+      // History expansion
+      historyMap:  {},   // { app_id: [ log entries ] }
+      historyBusy: {},   // { app_id: bool }
+      expandedIds: []    // which rows currently have history open
     };
   },
   computed: {
@@ -236,6 +241,33 @@ const DriveApplicants = {
       });
     },
 
+    // ── History expansion ─────────────────────────────────────────────────
+    toggleHistory: function (app) {
+      var self = this;
+      var idx  = self.expandedIds.indexOf(app.id);
+      if (idx !== -1) { self.expandedIds.splice(idx, 1); return; }
+      if (self.historyMap[app.id]) { self.expandedIds.push(app.id); return; }
+      self.$set(self.historyBusy, app.id, true);
+      window.api.get('/company/applications/' + app.id + '/history')
+        .then(function (res) {
+          self.$set(self.historyMap, app.id, res.data || []);
+          self.expandedIds.push(app.id);
+        })
+        .catch(function () { window.showToast('Could not load status history.'); })
+        .finally(function () { self.$set(self.historyBusy, app.id, false); });
+    },
+    isExpanded: function (appId) {
+      return this.expandedIds.indexOf(appId) !== -1;
+    },
+    statusBadgeClass: function (status) {
+      var map = {
+        'Applied': 'bg-secondary', 'Shortlisted': 'bg-info text-dark',
+        'Interview Scheduled': 'bg-warning text-dark',
+        'Selected': 'bg-success', 'Rejected': 'bg-danger', 'Placed': 'bg-primary'
+      };
+      return 'badge ' + (map[status] || 'bg-secondary');
+    },
+
     fmtDate: function (iso) {
       if (!iso) return '—';
       var d = new Date(iso);
@@ -298,7 +330,8 @@ const DriveApplicants = {
     '              </tr>' +
     '            </thead>' +
     '            <tbody>' +
-    '              <tr v-for="(a, idx) in applications" :key="a.id">' +
+    '              <template v-for="(a, idx) in applications" :key="a.id">' +
+    '              <tr>' +
     '                <td><input type="checkbox" class="form-check-input" :value="a.id" v-model="selected"></td>' +
     '                <td class="text-muted small">{{ idx + 1 }}</td>' +
     '                <td>' +
@@ -329,9 +362,33 @@ const DriveApplicants = {
     '                    </a>' +
     '                    <button class="btn btn-sm btn-outline-info" @click="openInterviewModal(a)"><i class="bi bi-calendar-event"></i> Interview</button>' +
     '                    <button v-if="!isFinalStatus(a.status)" class="btn btn-sm btn-success" @click="openSelectModal(a)"><i class="bi bi-check2-circle"></i> Select</button>' +
+    '                    <button class="btn btn-sm btn-outline-secondary" :disabled="historyBusy[a.id]" @click="toggleHistory(a)" title="Status history">' +
+    '                      <i class="bi bi-clock-history"></i> {{ isExpanded(a.id) ? "▲" : "▼" }}' +
+    '                    </button>' +
     '                  </div>' +
     '                </td>' +
     '              </tr>' +
+    '              <!-- History expansion row -->' +
+    '              <tr v-if="isExpanded(a.id) && historyMap[a.id]" :key="\'h-\' + a.id">' +
+    '                <td colspan="8" class="bg-light p-3">' +
+    '                  <p class="text-muted small fw-semibold mb-2"><i class="bi bi-clock-history me-1"></i>Status History — {{ a.student.full_name }}</p>' +
+    '                  <div v-if="!historyMap[a.id].length" class="text-muted small">No history recorded yet.</div>' +
+    '                  <div v-else class="d-flex gap-2 flex-wrap align-items-center">' +
+    '                    <template v-for="(entry, i) in historyMap[a.id]">' +
+    '                      <div class="text-center" style="min-width:110px">' +
+    '                        <span class="badge bg-secondary d-block mb-1" style="font-size:0.7rem">{{ entry.from_status || "Start" }}</span>' +
+    '                        <i class="bi bi-arrow-right text-muted d-block"></i>' +
+    '                        <span :class="statusBadgeClass(entry.to_status) + \' d-block mt-1\'" style="font-size:0.7rem">{{ entry.to_status }}</span>' +
+    '                        <small class="text-muted d-block mt-1" style="font-size:0.65rem">{{ fmtDate(entry.changed_at) }}</small>' +
+    '                        <small class="text-muted text-capitalize d-block" style="font-size:0.65rem">by {{ entry.changed_by_role }}</small>' +
+    '                        <small v-if="entry.note" class="text-info d-block" style="font-size:0.65rem">{{ entry.note }}</small>' +
+    '                      </div>' +
+    '                      <i v-if="i < historyMap[a.id].length - 1" class="bi bi-three-dots text-muted"></i>' +
+    '                    </template>' +
+    '                  </div>' +
+    '                </td>' +
+    '              </tr>' +
+    '              </template>' +
     '            </tbody>' +
     '          </table>' +
     '        </div>' +

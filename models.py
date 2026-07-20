@@ -93,6 +93,26 @@ class Application(db.Model):
     )
 
     interviews = db.relationship('Interview', backref='application', lazy=True, cascade='all, delete-orphan')
+    status_log = db.relationship(
+        'ApplicationStatusLog',
+        backref='application',
+        lazy=True,
+        cascade='all, delete-orphan',
+        order_by='ApplicationStatusLog.changed_at'
+    )
+
+
+class ApplicationStatusLog(db.Model):
+    """One row per Application.status transition. Immutable audit trail."""
+    __tablename__ = 'application_status_log'
+    id              = db.Column(db.Integer, primary_key=True)
+    application_id  = db.Column(db.Integer, db.ForeignKey('application.id'), nullable=False)
+    from_status     = db.Column(db.String(30))          # null for the initial Applied entry
+    to_status       = db.Column(db.String(30), nullable=False)
+    changed_by_role = db.Column(db.String(20))          # 'student' | 'company' | 'system'
+    changed_by_id   = db.Column(db.Integer)             # FK-less; role determines which table
+    note            = db.Column(db.Text)                # optional rejection reason etc.
+    changed_at      = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class Interview(db.Model):
