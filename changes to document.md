@@ -64,3 +64,27 @@ router.beforeEach((to, from) => {
 ```
 
 So the function isn't missing from `auth.py` — its entire responsibility was handed off to the frontend.
+
+---
+
+# 3. Milestone 8 — Redis Caching Improvements & Server Optimizations
+
+### A. Per-Student Applied Drives Caching in Redis (`routes/student.py`)
+- **Problem**: `GET /api/student/drives` previously hit SQLite on every request to compute `applied_drive_ids = [a.drive_id for a in student.applications]`, instantiating heavy ORM objects and preventing a 100% cache hit.
+- **Solution**:
+  1. Cached per-student applied drive IDs under `student_applied_ids_{student_id}` in Redis (5 min TTL).
+  2. Optimized SQL fallback query to direct column extraction (`db.session.query(Application.drive_id)`), avoiding ORM model overhead.
+  3. Added explicit invalidation via `safe_delete(f'student_applied_ids_{student.id}')` in `apply()` whenever a student submits a new application.
+- **Outcome**: `GET /api/student/drives` now executes **0 database queries** on Redis cache hits.
+
+### B. Multithreaded Flask Dev Server (`app.py`)
+- **Problem**: Single-threaded `app.run()` queued incoming HTTP requests serially, causing 100ms–200ms queueing delays when browser extensions issued background fetch calls (`set-current-domain`, `manager-domain-data`) simultaneously.
+- **Solution**: Enabled `threaded=True` in `app.run(debug=True, threaded=True)` to handle concurrent browser requests in parallel threads.
+
+### C. Precision Server Timing Header (`app.py`)
+- **Feature**: Added `@app.before_request` and `@app.after_request` hooks using `time.perf_counter()`.
+- **Header**: Returns `X-Response-Time` in response headers (e.g. `X-Response-Time: 1.15ms`), providing exact server-side processing time independent of browser extension / network queueing.
+
+### D. Centralized Cache Invalidation Audit (`cache_keys.py`, `routes/admin.py`, `routes/company.py`)
+- Verified and documented `remember_key()` and `invalidate_namespace()` for multi-query namespaces (`admin_companies`, `admin_students`, `company_drive_apps`).
+- Verified single-key direct invalidation via `safe_delete(student_drives_key(''))` for `student_drives_all`.

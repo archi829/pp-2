@@ -8,7 +8,8 @@ MAD2 changes from MAD1:
   - Error handlers return JSON instead of rendered HTML
 """
 
-from flask import Flask, jsonify, render_template
+import time
+from flask import Flask, jsonify, render_template, g
 
 from config import Config
 from models import db
@@ -36,6 +37,17 @@ def create_app():
     cache.init_app(app)
 
     app.celery = make_celery(app)   # stored on app so tasks.py/celery_worker.py can use it
+
+    @app.before_request
+    def start_timer():
+        g.start_time = time.perf_counter()
+
+    @app.after_request
+    def add_process_time_header(response):
+        if hasattr(g, 'start_time'):
+            diff = (time.perf_counter() - g.start_time) * 1000
+            response.headers['X-Response-Time'] = f'{diff:.2f}ms'
+        return response
 
     # ── Blueprints ────────────────────────────────────────────────────────────
     app.register_blueprint(auth_bp)     # /api/auth/*
@@ -89,4 +101,4 @@ def create_app():
 
 if __name__ == '__main__':
     app = create_app()
-    app.run(debug=True)
+    app.run(debug=True, threaded=True)

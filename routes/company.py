@@ -7,6 +7,7 @@ from flask_jwt_extended import get_jwt_identity
 from routes.decorators import company_required
 from models import db, Company, PlacementDrive, Application, Student, Notification, Interview, Placement, ApplicationStatusLog
 from constants import ApplicationStatus, DriveStatus, ApprovalStatus, InterviewStatus
+from cache_keys import student_drives_key, safe_delete
 
 company_bp = Blueprint('company', __name__, url_prefix='/api/company')
 
@@ -310,6 +311,7 @@ def update_drive_status(drive_id):
         return jsonify({'msg': "action must be 'close' or 'reopen'."}), 400
 
     db.session.commit()
+    safe_delete(student_drives_key(''))
     return jsonify({'msg': f'Drive "{drive.job_title}" {"closed" if action == "close" else "re-opened"}.',
                      'id': drive.id, 'new_status': drive.status}), 200
 
@@ -685,3 +687,66 @@ def view_resume(student_id):
         os.path.basename(student.resume_path),
         as_attachment=False,
     )
+
+
+# ── Export (Milestone 7 — Celery background job) ────────────────────────────
+
+@company_bp.route('/export', methods=['POST'])
+@company_required
+def trigger_export():
+    """Kicks off a background CSV export of this company's applicants,
+    placements, and analytics summary. Fire-and-forget: returns 202 with a
+    task_id the frontend can poll via GET /export/status/<task_id>."""
+    company = current_company()
+    from tasks import export_company_data_csv
+    try:
+        result = export_company_data_csv.delay(company.id)
+    except Exception:
+        # Redis/Celery broker unreachable — degrade gracefully instead of a 500.
+        return jsonify({'msg': 'Export service is currently unavailable. Try again later.'}), 503
+
+    return jsonify({
+        'msg': 'Export started. You will receive a notification when your data is ready.',
+        'task_id': result.id,
+    }), 202
+
+
+@company_bp.route('/export/status/<task_id>')
+@company_required
+def export_status(task_id):
+    """Poll the status of a previously-triggered export task. task_id is an
+    opaque, unguessable UUID from Celery, so no per-company ownership check
+    is needed here beyond requiring a valid company JWT to reach the route."""
+    from celery.result import AsyncResult
+    from tasks import export_company_data_csv
+    result = AsyncResult(task_id, app=export_company_data_csv.app)
+    return jsonify({
+        'task_id': task_id,
+        'status': result.status,  # PENDING / STARTED / SUCCESS / FAILURE
+        'result': result.result if result.ready() and not result.failed() else None,
+    }), 200
+
+
+# ── Notifications ─────────────────────────────────────────────────────────
+
+@company_bp.route('/notifications')
+@company_required
+def notifications():
+    """All notifications for this company, newest first. Marks them read as
+    a side effect, same behavior as the student notifications endpoint."""
+    company = current_company()
+    all_notifs = Notification.query.filter_by(
+        user_type='company',
+        user_id=company.id,
+    ).order_by(Notification.created_at.desc()).all()
+
+    for n in all_notifs:
+        n.is_read = True
+    db.session.commit()
+
+    return jsonify([{
+        'id': n.id,
+        'message': n.message,
+        'is_read': n.is_read,
+        'created_at': n.created_at.isoformat() if n.created_at else None,
+    } for n in all_notifs]), 200

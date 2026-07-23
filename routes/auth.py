@@ -5,6 +5,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from models import db, Admin, Company, Student
 from constants import ApprovalStatus
+from cache_keys import invalidate_namespace
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
@@ -118,6 +119,7 @@ def register_student():
     )
     db.session.add(student)
     db.session.commit()
+    invalidate_namespace('admin_students')
 
     return jsonify({
         'msg':          'Registration successful.',
@@ -157,6 +159,7 @@ def register_company():
     )
     db.session.add(company)
     db.session.commit()
+    invalidate_namespace('admin_companies')
 
     return jsonify({
         'msg':     'Registration submitted. Wait for admin approval before logging in.',

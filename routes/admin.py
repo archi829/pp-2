@@ -2,6 +2,10 @@ from flask import Blueprint, jsonify, request, send_from_directory, current_app
 from routes.decorators import admin_required
 from models import db, Company, Student, PlacementDrive, Application
 from constants import ApprovalStatus, DriveStatus
+from cache_keys import (
+    student_drives_key, admin_companies_key, admin_students_key,
+    remember_key, invalidate_namespace, safe_get, safe_set, safe_delete,
+)
 import os
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
@@ -138,8 +142,13 @@ def dashboard():
 def companies():
     q      = request.args.get('q', '').strip()
     status = request.args.get('status', '').strip()
-    query  = Company.query
 
+    cache_key = admin_companies_key(q, status)
+    cached = safe_get(cache_key)
+    if cached is not None:
+        return jsonify(cached), 200
+
+    query = Company.query
     if q:
         like = f'%{q}%'
         query = query.filter(
@@ -153,7 +162,11 @@ def companies():
         query = query.filter_by(approval_status=status)
 
     companies_list = query.order_by(Company.created_at.desc()).all()
-    return jsonify([serialize_company(c) for c in companies_list]), 200
+    payload = [serialize_company(c) for c in companies_list]
+
+    safe_set(cache_key, payload, timeout=300)
+    remember_key('admin_companies', cache_key)
+    return jsonify(payload), 200
 
 
 @admin_bp.route('/companies/<int:company_id>/approve', methods=['PUT'])
@@ -164,6 +177,7 @@ def approve_company(company_id):
         return jsonify({'msg': 'Company not found.'}), 404
     company.approval_status = ApprovalStatus.APPROVED
     db.session.commit()
+    invalidate_namespace('admin_companies')
     return jsonify({'msg': f'{company.company_name} has been approved.', 'id': company.id,
                      'new_status': company.approval_status}), 200
 
@@ -176,6 +190,7 @@ def reject_company(company_id):
         return jsonify({'msg': 'Company not found.'}), 404
     company.approval_status = ApprovalStatus.REJECTED
     db.session.commit()
+    invalidate_namespace('admin_companies')
     return jsonify({'msg': f'{company.company_name} has been rejected.', 'id': company.id,
                      'new_status': company.approval_status}), 200
 
@@ -188,6 +203,7 @@ def blacklist_company(company_id):
         return jsonify({'msg': 'Company not found.'}), 404
     company.is_blacklisted = not company.is_blacklisted
     db.session.commit()
+    invalidate_namespace('admin_companies')
     state = 'blacklisted' if company.is_blacklisted else 'unblacklisted'
     return jsonify({'msg': f'{company.company_name} has been {state}.', 'id': company.id,
                      'is_blacklisted': company.is_blacklisted}), 200
@@ -201,6 +217,7 @@ def delete_company(company_id):
         return jsonify({'msg': 'Company not found.'}), 404
     db.session.delete(company)
     db.session.commit()
+    invalidate_namespace('admin_companies')
     return jsonify({'msg': 'Company deleted.', 'id': company_id}), 200
 
 
@@ -225,6 +242,7 @@ def bulk_company_status():
             updated_ids.append(company.id)
 
     db.session.commit()
+    invalidate_namespace('admin_companies')
     return jsonify({'msg': f'{len(updated_ids)} companies marked as {new_status}.',
                      'updated_ids': updated_ids, 'new_status': new_status}), 200
 
@@ -255,6 +273,7 @@ def approve_drive(drive_id):
         return jsonify({'msg': 'Drive not found.'}), 404
     drive.status = DriveStatus.APPROVED
     db.session.commit()
+    safe_delete(student_drives_key(''))
     return jsonify({'msg': f'Drive "{drive.job_title}" approved.', 'id': drive.id,
                      'new_status': drive.status}), 200
 
@@ -267,6 +286,7 @@ def reject_drive(drive_id):
         return jsonify({'msg': 'Drive not found.'}), 404
     drive.status = DriveStatus.REJECTED
     db.session.commit()
+    safe_delete(student_drives_key(''))
     return jsonify({'msg': f'Drive "{drive.job_title}" rejected.', 'id': drive.id,
                      'new_status': drive.status}), 200
 
@@ -279,6 +299,7 @@ def delete_drive(drive_id):
         return jsonify({'msg': 'Drive not found.'}), 404
     db.session.delete(drive)
     db.session.commit()
+    safe_delete(student_drives_key(''))
     return jsonify({'msg': 'Drive deleted.', 'id': drive_id}), 200
 
 
@@ -303,6 +324,7 @@ def bulk_drive_status():
             updated_ids.append(drive.id)
 
     db.session.commit()
+    safe_delete(student_drives_key(''))
     return jsonify({'msg': f'{len(updated_ids)} drives marked as {new_status}.',
                      'updated_ids': updated_ids, 'new_status': new_status}), 200
 
@@ -313,6 +335,12 @@ def bulk_drive_status():
 @admin_required
 def students():
     q = request.args.get('q', '').strip()
+
+    cache_key = admin_students_key(q)
+    cached = safe_get(cache_key)
+    if cached is not None:
+        return jsonify(cached), 200
+
     query = Student.query
     if q:
         like = f'%{q}%'
@@ -325,7 +353,11 @@ def students():
             )
         )
     students_list = query.order_by(Student.created_at.desc()).all()
-    return jsonify([serialize_student_summary(s) for s in students_list]), 200
+    payload = [serialize_student_summary(s) for s in students_list]
+
+    safe_set(cache_key, payload, timeout=300)
+    remember_key('admin_students', cache_key)
+    return jsonify(payload), 200
 
 
 @admin_bp.route('/students/<int:student_id>')
@@ -351,6 +383,7 @@ def blacklist_student(student_id):
         return jsonify({'msg': 'Student not found.'}), 404
     student.is_blacklisted = not student.is_blacklisted
     db.session.commit()
+    invalidate_namespace('admin_students')
     state = 'blacklisted' if student.is_blacklisted else 'unblacklisted'
     return jsonify({'msg': f'{student.full_name} has been {state}.', 'id': student.id,
                      'is_blacklisted': student.is_blacklisted}), 200
@@ -364,6 +397,7 @@ def delete_student(student_id):
         return jsonify({'msg': 'Student not found.'}), 404
     db.session.delete(student)
     db.session.commit()
+    invalidate_namespace('admin_students')
     return jsonify({'msg': 'Student deleted.', 'id': student_id}), 200
 
 

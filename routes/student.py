@@ -17,6 +17,7 @@ from models import (
 )
 from constants import ApplicationStatus, DriveStatus, OfferStatus
 from celery.result import AsyncResult
+from cache_keys import student_drives_key, safe_get, safe_set, safe_delete
 
 student_bp = Blueprint('student', __name__, url_prefix='/api/student')
 
@@ -280,14 +281,39 @@ def download_resume():
 @student_bp.route('/drives')
 @student_required
 def list_drives():
-    student = current_student()
+    student_id = int(get_jwt_identity())
     q = (request.args.get('q') or '').strip()
-    applied_drive_ids = [a.drive_id for a in student.applications]
 
-    query = PlacementDrive.query.filter_by(status=DriveStatus.APPROVED)
-    if q:
+    # Per-student applied drive IDs (Cached in Redis to avoid DB hits on cache hits)
+    user_cache_key = f'student_applied_ids_{student_id}'
+    applied_drive_ids = safe_get(user_cache_key)
+    if applied_drive_ids is None:
+        applied_drive_ids = [
+            r[0] for r in db.session.query(Application.drive_id).filter_by(student_id=student_id).all()
+        ]
+        safe_set(user_cache_key, applied_drive_ids, timeout=300)
+
+    if not q:
+        # Only the unfiltered "all approved drives" view is cacheable — it's
+        # identical for every student and is the single most-hit request
+        # pattern (every student landing on Browse Drives with no query yet
+        # typed). Cached manually (not via @cache.cached on the whole view)
+        # because the view's response also bundles the per-student
+        # applied_drive_ids above, which must stay fresh on every request.
+        cache_key = student_drives_key('')
+        serialized = safe_get(cache_key)
+        if serialized is None:
+            drives = PlacementDrive.query.filter_by(
+                status=DriveStatus.APPROVED
+            ).order_by(PlacementDrive.created_at.desc()).all()
+            serialized = [serialize_drive(d) for d in drives]
+            safe_set(cache_key, serialized, timeout=300)
+    else:
+        # Search queries are cheap one-off `ilike` lookups and are never
+        # cached — caching every distinct search term a student could type
+        # isn't worth the memory, and this keeps the cache surface small.
         like = f'%{q}%'
-        query = query.join(Company).filter(
+        query = PlacementDrive.query.filter_by(status=DriveStatus.APPROVED).join(Company).filter(
             db.or_(
                 PlacementDrive.job_title.ilike(like),
                 PlacementDrive.required_skills.ilike(like),
@@ -295,10 +321,11 @@ def list_drives():
                 Company.company_name.ilike(like),
             )
         )
+        drives = query.order_by(PlacementDrive.created_at.desc()).all()
+        serialized = [serialize_drive(d) for d in drives]
 
-    drives = query.order_by(PlacementDrive.created_at.desc()).all()
     return jsonify({
-        'drives': [serialize_drive(d) for d in drives],
+        'drives': serialized,
         'applied_drive_ids': applied_drive_ids,
     }), 200
 
@@ -349,6 +376,7 @@ def apply():
         db.session.flush()  # populate application.id before writing the log row
         _log_status(application.id, None, ApplicationStatus.APPLIED, 'student', student.id)
         db.session.commit()
+        safe_delete(f'student_applied_ids_{student.id}')
     except IntegrityError:
         db.session.rollback()
         return jsonify({'msg': 'You have already applied for this drive.'}), 409
