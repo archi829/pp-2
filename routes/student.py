@@ -16,6 +16,7 @@ from models import (
     Notification, Interview, Placement, Company, ApplicationStatusLog
 )
 from constants import ApplicationStatus, DriveStatus, OfferStatus
+from celery.result import AsyncResult
 
 student_bp = Blueprint('student', __name__, url_prefix='/api/student')
 
@@ -374,6 +375,41 @@ def list_applications():
         'applications': [serialize_application(a) for a in apps],
         'status_counts': counts,
         'total': len(apps),
+    }), 200
+
+
+@student_bp.route('/applications/export', methods=['POST'])
+@student_required
+def trigger_export():
+    """Kicks off a background CSV export of this student's application
+    history (Milestone 7). Fire-and-forget: returns 202 with a task_id the
+    frontend can poll via GET /applications/export/status/<task_id>."""
+    student = current_student()
+    from tasks import export_applications_csv
+    try:
+        result = export_applications_csv.delay(student.id)
+    except Exception:
+        # Redis/Celery broker unreachable — degrade gracefully instead of a 500.
+        return jsonify({'msg': 'Export service is currently unavailable. Try again later.'}), 503
+
+    return jsonify({
+        'msg': 'Export started. You will receive a notification when your CSV is ready.',
+        'task_id': result.id,
+    }), 202
+
+
+@student_bp.route('/applications/export/status/<task_id>')
+@student_required
+def export_status(task_id):
+    """Poll the status of a previously-triggered export task. task_id is an
+    opaque, unguessable UUID from Celery, so no per-student ownership check
+    is needed here beyond requiring a valid student JWT to reach the route."""
+    from tasks import export_applications_csv
+    result = AsyncResult(task_id, app=export_applications_csv.app)
+    return jsonify({
+        'task_id': task_id,
+        'status': result.status,  # PENDING / STARTED / SUCCESS / FAILURE
+        'result': result.result if result.ready() and not result.failed() else None,
     }), 200
 
 

@@ -23,7 +23,9 @@ const StudentApplications = {
       // history expansion
       historyMap: {},     // { app_id: [ log entries ] }
       historyBusy: {},    // { app_id: bool }
-      expandedIds: []     // which rows have history open
+      expandedIds: [],    // which rows have history open
+      // CSV export (Milestone 7 — Celery background job)
+      exporting: false
     };
   },
   mounted: function () {
@@ -118,6 +120,44 @@ const StudentApplications = {
     openCL:  function (app) { this.clApp = app; this.showCLModal = true; },
     closeCL: function ()    { this.showCLModal = false; this.clApp = null; },
 
+    // ── CSV export (Milestone 7 — background Celery job) ────────────────────
+    exportCSV: function () {
+      var self = this;
+      self.exporting = true;
+      window.api.post('/student/applications/export')
+        .then(function (res) {
+          var taskId = res.data.task_id;
+          window.showToast('Export started — you will be notified when ready.');
+          self._pollExport(taskId);
+        })
+        .catch(function (err) {
+          window.showToast((err.response && err.response.data && err.response.data.msg)
+            || 'Export failed.');
+          self.exporting = false;
+        });
+    },
+    _pollExport: function (taskId) {
+      var self = this;
+      var interval = setInterval(function () {
+        window.api.get('/student/applications/export/status/' + taskId)
+          .then(function (res) {
+            if (res.data.status === 'SUCCESS') {
+              clearInterval(interval);
+              self.exporting = false;
+              window.showToast('CSV ready! Check your notifications for the download link.');
+            } else if (res.data.status === 'FAILURE') {
+              clearInterval(interval);
+              self.exporting = false;
+              window.showToast('Export failed. Please try again.');
+            }
+          })
+          .catch(function () {
+            clearInterval(interval);
+            self.exporting = false;
+          });
+      }, 3000);
+    },
+
     // ── Helpers ────────────────────────────────────────────────────────────
     statusBadgeClass: function (status) {
       var map = {
@@ -155,7 +195,13 @@ const StudentApplications = {
     '<div class="container mt-4">' +
     '  <div class="d-flex justify-content-between align-items-center mb-3">' +
     '    <h4><i class="bi bi-clock-history me-2"></i>My Application History</h4>' +
-    '    <router-link to="/student/dashboard" class="btn btn-sm btn-outline-secondary">← Dashboard</router-link>' +
+    '    <div class="d-flex gap-2">' +
+    '      <button class="btn btn-sm btn-outline-secondary" :disabled="exporting" @click="exportCSV">' +
+    '        <span v-if="exporting" class="spinner-border spinner-border-sm me-1"></span>' +
+    '        <i v-else class="bi bi-download me-1"></i>{{ exporting ? \'Exporting…\' : \'Export CSV\' }}' +
+    '      </button>' +
+    '      <router-link to="/student/dashboard" class="btn btn-sm btn-outline-secondary">← Dashboard</router-link>' +
+    '    </div>' +
     '  </div>' +
 
     '  <error-alert :message="error" @dismiss="error = \'\'"></error-alert>' +

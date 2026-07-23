@@ -10,8 +10,9 @@ MAD2 changes from MAD1:
 
 from flask import Flask, jsonify, render_template
 
+from config import Config
 from models import db
-from extensions import jwt, cors
+from extensions import jwt, cors, cache, make_celery
 
 from routes.auth    import auth_bp
 from routes.admin   import admin_bp
@@ -24,12 +25,7 @@ def create_app():
     app = Flask(__name__)
 
     # ── Config ────────────────────────────────────────────────────────────────
-    app.config['SECRET_KEY']                  = 'mad2-jwt-secret-change-in-prod'
-    app.config['JWT_SECRET_KEY']              = 'mad2-jwt-secret-change-in-prod'
-    app.config['JWT_ACCESS_TOKEN_EXPIRES']    = False   # no expiry for dev; set timedelta in prod
-    app.config['SQLALCHEMY_DATABASE_URI']     = 'sqlite:///placement_portal.db'
-    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['UPLOAD_FOLDER']               = 'static/uploads/resumes'
+    app.config.from_object(Config)
 
     # ── Extensions ────────────────────────────────────────────────────────────
     db.init_app(app)
@@ -37,6 +33,9 @@ def create_app():
     # Same-origin: Vue is served by Flask on the same host.
     # If running Vue dev server on port 5173, add: origins=["http://localhost:5173"]
     cors.init_app(app, origins=["http://localhost:5000"])
+    cache.init_app(app)
+
+    app.celery = make_celery(app)   # stored on app so tasks.py/celery_worker.py can use it
 
     # ── Blueprints ────────────────────────────────────────────────────────────
     app.register_blueprint(auth_bp)     # /api/auth/*
