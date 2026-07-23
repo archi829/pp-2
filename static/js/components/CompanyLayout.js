@@ -42,6 +42,12 @@ const CompanyLayout = {
     '          </li>' +
     '' +
     '          <li class="nav-item">' +
+    '            <router-link class="nav-link" to="/company/notifications">' +
+    '              <i class="bi bi-bell"></i> Notifications' +
+    '            </router-link>' +
+    '          </li>' +
+    '' +
+    '          <li class="nav-item">' +
     '            <router-link class="nav-link" to="/company/profile">' +
     '              <i class="bi bi-building"></i> Profile' +
     '            </router-link>' +

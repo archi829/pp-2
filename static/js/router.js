@@ -40,7 +40,8 @@ const routes = [
       { path: 'drives/:id/edit', component: CompanyDrives },
       { path: 'drives/:id/applications', component: DriveApplicants },
       { path: 'student/:id', component: CompanyStudentProfile },
-      { path: 'interviews', component: CompanyInterviews }
+      { path: 'interviews', component: CompanyInterviews },
+      { path: 'notifications', component: CompanyNotifications }
     ]
   },
 

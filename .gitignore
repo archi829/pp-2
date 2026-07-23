@@ -35,6 +35,6 @@ htmlcov/
 # Logs
 *.log
 
-# Uploaded resumes
-static/uploads/resumes/*
-!static/uploads/resumes/.gitkeep
+# Celery Beat's persistent schedule file
+celerybeat-schedule
+celerybeat.pid

@@ -45,7 +45,7 @@ cd /mnt/c/Users/Asus/Desktop/projects/mad2/repo
 
 source venv/bin/activate
 
-celery -A <your_app> worker --loglevel=info
+celery -A celery_worker.celery worker --loglevel=info
 ```
 
 Wait until you see:

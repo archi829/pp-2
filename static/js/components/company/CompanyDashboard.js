@@ -12,7 +12,9 @@ const CompanyDashboard = {
       company: {},
       stats: { total_drives: 0, active_drives: 0, pending_drives: 0, total_applicants: 0 },
       allDrives: [],
-      statusFilter: ''
+      statusFilter: '',
+      // CSV export (Milestone 7 — Celery background job)
+      exporting: false
     };
   },
   computed: {
@@ -26,6 +28,43 @@ const CompanyDashboard = {
     this.fetchAll();
   },
   methods: {
+    // ── CSV export (Milestone 7 — background Celery job) ────────────────────
+    exportCSV: function () {
+      var self = this;
+      self.exporting = true;
+      window.api.post('/company/export')
+        .then(function (res) {
+          var taskId = res.data.task_id;
+          window.showToast('Export started — you will be notified when ready.');
+          self._pollExport(taskId);
+        })
+        .catch(function (err) {
+          window.showToast((err.response && err.response.data && err.response.data.msg)
+            || 'Export failed.');
+          self.exporting = false;
+        });
+    },
+    _pollExport: function (taskId) {
+      var self = this;
+      var interval = setInterval(function () {
+        window.api.get('/company/export/status/' + taskId)
+          .then(function (res) {
+            if (res.data.status === 'SUCCESS') {
+              clearInterval(interval);
+              self.exporting = false;
+              window.showToast('Export ready! Check your notifications for the download link.');
+            } else if (res.data.status === 'FAILURE') {
+              clearInterval(interval);
+              self.exporting = false;
+              window.showToast('Export failed. Please try again.');
+            }
+          })
+          .catch(function () {
+            clearInterval(interval);
+            self.exporting = false;
+          });
+      }, 3000);
+    },
     fetchAll: function () {
       var self = this;
       self.loading = true;
@@ -110,9 +149,15 @@ const CompanyDashboard = {
     '            <p class="text-muted small mb-0">{{ company.email }}</p>' +
     '            <a v-if="company.website" :href="company.website" target="_blank" class="small">{{ company.website }}</a>' +
     '          </div>' +
-    '          <router-link to="/company/drives/new" class="btn btn-dark">' +
-    '            <i class="bi bi-plus-circle me-1"></i>Post New Drive' +
-    '          </router-link>' +
+    '          <div class="d-flex gap-2">' +
+    '            <button class="btn btn-outline-secondary" :disabled="exporting" @click="exportCSV">' +
+    '              <span v-if="exporting" class="spinner-border spinner-border-sm me-1"></span>' +
+    '              <i v-else class="bi bi-download me-1"></i>{{ exporting ? \'Exporting…\' : \'Export Data\' }}' +
+    '            </button>' +
+    '            <router-link to="/company/drives/new" class="btn btn-dark">' +
+    '              <i class="bi bi-plus-circle me-1"></i>Post New Drive' +
+    '            </router-link>' +
+    '          </div>' +
     '        </div>' +
     '      </div>' +
     '    </div>' +
