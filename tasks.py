@@ -429,3 +429,258 @@ def _send_email(to_addr, subject, body):
             smtp.send_message(msg)
     except Exception as e:
         print(f'[EMAIL ERROR] {e}')
+
+
+# ── Task 5 — AI resume tailoring via Groq API ───────────────────────────────
+
+def _pdf_safe(text):
+    """Encode text to Latin-1 safe for fpdf2 core fonts."""
+    return str(text).encode('latin-1', errors='replace').decode('latin-1')
+
+
+@celery.task(name='tasks.generate_tailored_resume')
+def generate_tailored_resume(student_id, drive_id, selected_projects=None):
+    """Uses Groq AI to generate a tailored 1-page resume PDF aligned to
+    the drive's required_skills and job_description. Saves under
+    static/resumes/ and creates a Notification with the download link.
+
+    Gracefully degrades if GROQ_API_KEY is not set — generates a
+    structured resume from the student's existing data without AI
+    tailoring in that case."""
+    from models import db, Student, PlacementDrive, Notification
+    from config import Config
+
+    student = Student.query.get(student_id)
+    drive = PlacementDrive.query.get(drive_id)
+    if not student or not drive:
+        return {'error': 'Student or Drive not found'}
+
+    selected_projects = selected_projects or []
+
+    # ── Gather context ───────────────────────────────────────────────────
+    student_skills = student.skills or 'Not specified'
+    student_education = student.education or 'Not specified'
+    student_name = student.full_name
+    student_email = student.email
+    student_phone = student.phone or ''
+    student_cgpa = student.cgpa or ''
+
+    job_title = drive.job_title
+    job_description = drive.job_description or ''
+    required_skills = drive.required_skills or ''
+    company_name = drive.company.company_name if drive.company else 'Unknown'
+
+    # ── Call Groq API (or degrade gracefully) ────────────────────────────
+    tailored_bullets = []
+    summary = ''
+
+    if Config.GROQ_API_KEY:
+        try:
+            from groq import Groq
+
+            client = Groq(api_key=Config.GROQ_API_KEY)
+
+            projects_text = '\n'.join(f'- {p}' for p in selected_projects) if selected_projects else 'None provided'
+
+            prompt = f"""You are a professional resume writer. Generate a tailored resume for the following student
+applying to a specific job position. Output ONLY the content, no markdown formatting.
+
+STUDENT PROFILE:
+- Name: {student_name}
+- Email: {student_email}
+- Phone: {student_phone}
+- CGPA: {student_cgpa}
+- Skills: {student_skills}
+- Education: {student_education}
+
+SELECTED PROJECTS:
+{projects_text}
+
+TARGET POSITION:
+- Job Title: {job_title} at {company_name}
+- Job Description: {job_description}
+- Required Skills: {required_skills}
+
+Generate the following sections:
+1. PROFESSIONAL SUMMARY (2-3 sentences tailored to this specific role)
+2. KEY SKILLS (bullet points — prioritize skills that match the required_skills)
+3. PROJECT EXPERIENCE (3-4 bullet points using STAR format, tailored to the job)
+4. EDUCATION (formatted nicely)
+
+Keep it concise enough for a single page. Focus on relevance to the target position."""
+
+            response = client.chat.completions.create(
+                model=Config.GROQ_MODEL,
+                messages=[
+                    {'role': 'user', 'content': prompt},
+                ],
+            )
+            ai_text = response.choices[0].message.content or ''
+
+            # Parse sections from AI response
+            sections = ai_text.split('\n')
+            current_section = ''
+            parsed = {'summary': [], 'skills': [], 'projects': [], 'education': []}
+
+            for line in sections:
+                line_stripped = line.strip()
+                if not line_stripped:
+                    continue
+                upper = line_stripped.upper()
+                if 'PROFESSIONAL SUMMARY' in upper:
+                    current_section = 'summary'
+                elif 'KEY SKILLS' in upper or 'SKILLS' in upper:
+                    current_section = 'skills'
+                elif 'PROJECT' in upper or 'EXPERIENCE' in upper:
+                    current_section = 'projects'
+                elif 'EDUCATION' in upper:
+                    current_section = 'education'
+                elif current_section:
+                    cleaned = line_stripped.lstrip('•-*· ').strip()
+                    if cleaned:
+                        parsed[current_section].append(cleaned)
+
+            summary = ' '.join(parsed['summary']) if parsed['summary'] else ''
+            tailored_bullets = parsed
+
+        except Exception as e:
+            print(f'[GROQ ERROR] {e} — falling back to non-AI resume')
+            tailored_bullets = []
+            summary = ''
+
+    # ── Build PDF ────────────────────────────────────────────────────────
+    from fpdf import FPDF
+
+    class ResumePDF(FPDF):
+        def header(self):
+            pass  # we draw the header manually
+
+        def footer(self):
+            self.set_y(-10)
+            self.set_font('Helvetica', 'I', 7)
+            self.set_text_color(150, 150, 150)
+            self.cell(0, 5, 'Generated by Placement Portal AI Resume Tailorer', align='C')
+
+    pdf = ResumePDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+
+    # ── Header: Name + Contact ───────────────────────────────────────────
+    pdf.set_font('Helvetica', 'B', 18)
+    pdf.set_text_color(33, 37, 41)
+    pdf.cell(0, 10, _pdf_safe(student_name), ln=True, align='C')
+
+    contact_parts = [student_email]
+    if student_phone:
+        contact_parts.append(student_phone)
+    if student_cgpa:
+        contact_parts.append(f'CGPA: {student_cgpa}')
+    pdf.set_font('Helvetica', '', 9)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 5, _pdf_safe(' | '.join(contact_parts)), ln=True, align='C')
+
+    # Divider
+    pdf.ln(3)
+    pdf.set_draw_color(52, 73, 94)
+    pdf.set_line_width(0.5)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.ln(4)
+
+    # ── Target role ──────────────────────────────────────────────────────
+    pdf.set_font('Helvetica', 'I', 10)
+    pdf.set_text_color(52, 73, 94)
+    pdf.cell(0, 6, _pdf_safe(f'Tailored for: {job_title} at {company_name}'), ln=True, align='C')
+    pdf.ln(4)
+
+    def section_heading(title):
+        pdf.set_font('Helvetica', 'B', 11)
+        pdf.set_text_color(44, 62, 80)
+        pdf.cell(0, 7, _pdf_safe(title), ln=True)
+        pdf.set_draw_color(189, 195, 199)
+        pdf.set_line_width(0.3)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(2)
+
+    def bullet_point(text):
+        pdf.set_font('Helvetica', '', 9)
+        pdf.set_text_color(50, 50, 50)
+        x = pdf.get_x()
+        pdf.cell(5, 5, _pdf_safe('•'))
+        pdf.multi_cell(175, 5, _pdf_safe(text))
+        pdf.ln(1)
+
+    if tailored_bullets and isinstance(tailored_bullets, dict):
+        # AI-generated content
+        if summary:
+            section_heading('PROFESSIONAL SUMMARY')
+            pdf.set_font('Helvetica', '', 9)
+            pdf.set_text_color(50, 50, 50)
+            pdf.multi_cell(0, 5, _pdf_safe(summary))
+            pdf.ln(3)
+
+        if tailored_bullets.get('skills'):
+            section_heading('KEY SKILLS')
+            skills_text = ' | '.join(tailored_bullets['skills'][:12])
+            pdf.set_font('Helvetica', '', 9)
+            pdf.set_text_color(50, 50, 50)
+            pdf.multi_cell(0, 5, _pdf_safe(skills_text))
+            pdf.ln(3)
+
+        if tailored_bullets.get('projects'):
+            section_heading('PROJECT EXPERIENCE')
+            for b in tailored_bullets['projects'][:6]:
+                bullet_point(b)
+            pdf.ln(2)
+
+        if tailored_bullets.get('education'):
+            section_heading('EDUCATION')
+            for b in tailored_bullets['education'][:4]:
+                bullet_point(b)
+    else:
+        # Fallback: non-AI structured resume
+        section_heading('PROFESSIONAL SUMMARY')
+        pdf.set_font('Helvetica', '', 9)
+        pdf.set_text_color(50, 50, 50)
+        pdf.multi_cell(0, 5, _pdf_safe(
+            f'Motivated student with skills in {student_skills}, seeking the '
+            f'{job_title} position at {company_name}.'
+        ))
+        pdf.ln(3)
+
+        section_heading('SKILLS')
+        pdf.set_font('Helvetica', '', 9)
+        pdf.set_text_color(50, 50, 50)
+        pdf.multi_cell(0, 5, _pdf_safe(student_skills))
+        pdf.ln(3)
+
+        if selected_projects:
+            section_heading('PROJECTS')
+            for proj in selected_projects[:5]:
+                bullet_point(proj)
+            pdf.ln(2)
+
+        section_heading('EDUCATION')
+        pdf.set_font('Helvetica', '', 9)
+        pdf.set_text_color(50, 50, 50)
+        pdf.multi_cell(0, 5, _pdf_safe(student_education))
+
+    # ── Save PDF ─────────────────────────────────────────────────────────
+    resumes_dir = 'static/resumes'
+    os.makedirs(resumes_dir, exist_ok=True)
+    filename = f'tailored_student_{student_id}_drive_{drive_id}.pdf'
+    filepath = os.path.join(resumes_dir, filename)
+    pdf.output(filepath)
+
+    db.session.add(Notification(
+        user_type='student',
+        user_id=student_id,
+        message=f'Your tailored resume for {job_title} at {company_name} is ready. '
+                f'Download: /static/resumes/{filename}',
+    ))
+    db.session.commit()
+
+    return {
+        'file': filepath,
+        'download_url': f'/static/resumes/{filename}',
+        'ai_powered': bool(Config.GROQ_API_KEY and tailored_bullets),
+    }

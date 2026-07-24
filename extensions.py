@@ -7,11 +7,18 @@ Avoids circular imports by keeping extensions separate from models and app.
 from flask_jwt_extended import JWTManager
 from flask_cors import CORS
 from flask_caching import Cache
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from celery import Celery
 
 jwt   = JWTManager()
 cors  = CORS()
 cache = Cache()
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=None,           # set from app.config in init_app
+    default_limits=[],          # no global limit — applied per-route
+)
 
 
 def make_celery(app):

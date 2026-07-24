@@ -5,14 +5,19 @@ values inline. celery_worker.py / extensions.make_celery() read the
 CELERY_* keys straight off app.config, so they stay in sync automatically.
 """
 import os
+from datetime import timedelta
 from celery.schedules import crontab
+from dotenv import load_dotenv
+
+
+load_dotenv()
 
 
 class Config:
     # ── Flask / SQLAlchemy ───────────────────────────────────────────────
     SECRET_KEY = os.environ.get('SECRET_KEY', 'mad2-jwt-secret-change-in-prod')
     JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'mad2-jwt-secret-change-in-prod')
-    JWT_ACCESS_TOKEN_EXPIRES = False   # no expiry for dev; set a timedelta in prod
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=24)   # 24h expiry; was False (no expiry) in dev
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', 'sqlite:///placement_portal.db')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     UPLOAD_FOLDER = 'static/uploads/resumes'
@@ -42,6 +47,14 @@ class Config:
     CACHE_TYPE = 'redis'
     CACHE_REDIS_URL = REDIS_URL + '/1'   # DB 1 keeps cache separate from the Celery broker (DB 0)
     CACHE_DEFAULT_TIMEOUT = 300
+
+    # ── Rate Limiting ────────────────────────────────────────────────────
+    RATELIMIT_STORAGE_URI = REDIS_URL + '/2'   # DB 2 keeps rate-limit counters separate
+    RATELIMIT_STRATEGY = 'fixed-window'
+
+    # ── AI / Groq ────────────────────────────────────────────────────────
+    GROQ_API_KEY = os.environ.get('GROQ_API_KEY', '')
+    GROQ_MODEL = os.environ.get('GROQ_MODEL', 'llama-3.3-70b-versatile')
 
     # ── Email (Mailtrap for dev, real SMTP for prod) ────────────────────
     MAIL_SERVER = os.environ.get('MAIL_SERVER', 'smtp.mailtrap.io')

@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_URL=sqlite:///instance/placement_portal.db
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-default_secret}
+      - SECRET_KEY=${SECRET_KEY:-default_secret}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+    volumes:
+      - ./instance:/app/instance
+      - ./static/uploads:/app/static/uploads
+      - ./static/resumes:/app/static/resumes
+    depends_on:
+      - redis
+
+  worker:
+    build: .
+    command: celery -A celery_worker.celery worker --loglevel=info
+    environment:
+      - DATABASE_URL=sqlite:///instance/placement_portal.db
+      - REDIS_URL=redis://redis:6379
+      - GROQ_API_KEY=${GROQ_API_KEY}
+    volumes:
+      - ./instance:/app/instance
+      - ./static/uploads:/app/static/uploads
+      - ./static/resumes:/app/static/resumes
+    depends_on:
+      - redis
+
+  beat:
+    build: .
+    command: celery -A celery_worker.celery beat --loglevel=info
+    environment:
+      - DATABASE_URL=sqlite:///instance/placement_portal.db
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - ./instance:/app/instance
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:

@@ -4,6 +4,7 @@ Flask-SQLAlchemy==3.1.1
 SQLAlchemy==2.0.48
 Werkzeug==3.1.7
 Jinja2==3.1.6
+python-dotenv==1.0.1
 
 flask-jwt-extended==4.6.0
 flask-cors==4.0.0
@@ -18,3 +19,16 @@ fpdf2==2.7.9
 
 # ── Caching (Milestone 8) ─────────────────────────────────────────────────────
 flask-caching==2.1.0
+
+# ── AI Resume Tailoring (Groq API) ────────────────────────────────────────────
+groq==0.31.0
+
+# ── Rate Limiting ─────────────────────────────────────────────────────────────
+flask-limiter[redis]==3.5.0
+
+# ── Production WSGI server ────────────────────────────────────────────────────
+gunicorn==22.0.0
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest==8.3.2
+pytest-flask==1.3.0

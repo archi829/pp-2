@@ -6,6 +6,7 @@ from werkzeug.utils import secure_filename
 from models import db, Admin, Company, Student
 from constants import ApprovalStatus
 from cache_keys import invalidate_namespace
+from extensions import limiter
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
@@ -24,6 +25,7 @@ def _make_token(user_id, role, email):
 
 
 @auth_bp.route('/login', methods=['POST'])
+@limiter.limit("10/minute")
 def login():
     data     = request.get_json(silent=True) or {}
     email    = data.get('email', '').strip().lower()

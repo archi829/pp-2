@@ -24,6 +24,16 @@ not just implemented in the route files):
                         write to Student (blacklist/delete/new
                         self-registration).
 
+  - admin_dashboard  : 2 min TTL. Aggregated counts that change on any
+                        write. Invalidated on company/drive approval or
+                        student registration.
+
+  - admin_drives     : 2 min TTL. Drive listing for admin. Invalidated on
+                        drive create/approve/reject/delete.
+
+  - public_stats     : 10 min TTL. Read-only public stats that change
+                        slowly. Invalidated on major writes.
+
 TTLs above are a backstop for a write site nobody remembered to instrument,
 not the primary invalidation mechanism — every write path listed above has
 an explicit invalidation call at its call site (see routes/admin.py,
@@ -41,6 +51,18 @@ def admin_companies_key(q='', status=''):
 
 def admin_students_key(q=''):
     return f'admin_students_{q or "all"}'
+
+
+def admin_dashboard_key():
+    return 'admin_dashboard'
+
+
+def admin_drives_key(status='', company_id=''):
+    return f'admin_drives_{status or "all"}_{company_id or "all"}'
+
+
+def public_stats_key():
+    return 'public_stats'
 
 
 def safe_get(key):

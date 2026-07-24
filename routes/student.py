@@ -569,3 +569,48 @@ def download_offer_letter(placement_id):
         os.path.basename(placement.offer_letter_path),
         as_attachment=True
     )
+
+
+# ── AI Resume Tailoring ───────────────────────────────────────────────────────
+
+@student_bp.route('/drives/<int:drive_id>/tailor-resume', methods=['POST'])
+@student_required
+def tailor_resume(drive_id):
+    """Triggers a Celery background task that uses Groq AI to generate
+    a tailored 1-page PDF resume aligned to the drive's required skills
+    and job description. Returns 202 with a task_id to poll."""
+    student = current_student()
+    drive = PlacementDrive.query.get(drive_id)
+    if not drive:
+        return jsonify({'msg': 'Drive not found.'}), 404
+    if drive.status != DriveStatus.APPROVED:
+        return jsonify({'msg': 'This drive is not open.'}), 400
+
+    data = request.get_json(silent=True) or {}
+    selected_projects = data.get('selected_projects', [])
+
+    from tasks import generate_tailored_resume
+    try:
+        result = generate_tailored_resume.delay(
+            student.id, drive_id, selected_projects
+        )
+    except Exception:
+        return jsonify({'msg': 'Resume tailoring service is currently unavailable. Try again later.'}), 503
+
+    return jsonify({
+        'msg': 'Resume tailoring started. You will receive a notification when your PDF is ready.',
+        'task_id': result.id,
+    }), 202
+
+
+@student_bp.route('/tailor-resume/status/<task_id>')
+@student_required
+def tailor_resume_status(task_id):
+    """Poll the status of a previously-triggered resume tailoring task."""
+    from tasks import generate_tailored_resume
+    result = AsyncResult(task_id, app=generate_tailored_resume.app)
+    return jsonify({
+        'task_id': task_id,
+        'status': result.status,
+        'result': result.result if result.ready() and not result.failed() else None,
+    }), 200

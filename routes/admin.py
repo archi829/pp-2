@@ -1,12 +1,14 @@
 from flask import Blueprint, jsonify, request, send_from_directory, current_app
 from routes.decorators import admin_required
-from models import db, Company, Student, PlacementDrive, Application
-from constants import ApprovalStatus, DriveStatus
+from models import db, Company, Student, PlacementDrive, Application, Placement
+from constants import ApprovalStatus, DriveStatus, ApplicationStatus
 from cache_keys import (
     student_drives_key, admin_companies_key, admin_students_key,
+    admin_dashboard_key, admin_drives_key, public_stats_key,
     remember_key, invalidate_namespace, safe_get, safe_set, safe_delete,
 )
 import os
+from collections import Counter
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 
@@ -102,11 +104,16 @@ def serialize_log(entry):
     }
 
 
-# ── Dashboard ────────────────────────────────────────────────────────────
+# ── Dashboard (cached — 2 min TTL) ──────────────────────────────────────
 
 @admin_bp.route('/dashboard')
 @admin_required
 def dashboard():
+    cache_key = admin_dashboard_key()
+    cached = safe_get(cache_key)
+    if cached is not None:
+        return jsonify(cached), 200
+
     total_students  = Student.query.count()
     total_companies = Company.query.count()
     total_drives    = PlacementDrive.query.count()
@@ -123,7 +130,7 @@ def dashboard():
     pending_companies_count = Company.query.filter_by(approval_status=ApprovalStatus.PENDING).count()
     pending_drives_count    = PlacementDrive.query.filter_by(status=DriveStatus.PENDING).count()
 
-    return jsonify({
+    payload = {
         'total_students': total_students,
         'total_companies': total_companies,
         'total_drives': total_drives,
@@ -132,7 +139,75 @@ def dashboard():
         'pending_drives': [serialize_drive(d) for d in pending_drives],
         'pending_companies_count': pending_companies_count,
         'pending_drives_count': pending_drives_count,
-    }), 200
+    }
+
+    safe_set(cache_key, payload, timeout=120)   # 2 min TTL
+    return jsonify(payload), 200
+
+
+# ── Analytics ────────────────────────────────────────────────────────────
+
+@admin_bp.route('/analytics')
+@admin_required
+def analytics():
+    """Aggregated placement analytics: application funnel, top skills,
+    placement rates. Cached for 5 minutes."""
+    cache_key = 'admin_analytics'
+    cached = safe_get(cache_key)
+    if cached is not None:
+        return jsonify(cached), 200
+
+    # ── Application funnel ───────────────────────────────────────────────
+    total_apps    = Application.query.count()
+    applied       = Application.query.filter_by(status=ApplicationStatus.APPLIED).count()
+    shortlisted   = Application.query.filter_by(status=ApplicationStatus.SHORTLISTED).count()
+    interviewing  = Application.query.filter_by(status=ApplicationStatus.INTERVIEW_SCHEDULED).count()
+    selected      = Application.query.filter_by(status=ApplicationStatus.SELECTED).count()
+    rejected      = Application.query.filter_by(status=ApplicationStatus.REJECTED).count()
+    placed        = Application.query.filter_by(status=ApplicationStatus.PLACED).count()
+
+    funnel = {
+        'total':               total_apps,
+        'applied':             applied,
+        'shortlisted':         shortlisted,
+        'interview_scheduled': interviewing,
+        'selected':            selected,
+        'rejected':            rejected,
+        'placed':              placed,
+    }
+
+    # ── Rates ────────────────────────────────────────────────────────────
+    selection_rate = round((selected / total_apps * 100), 1) if total_apps else 0.0
+    total_placements = Placement.query.count()
+    placement_rate = round((total_placements / total_apps * 100), 1) if total_apps else 0.0
+
+    # ── Top in-demand skills ─────────────────────────────────────────────
+    drives = PlacementDrive.query.filter(
+        PlacementDrive.required_skills.isnot(None),
+        PlacementDrive.required_skills != '',
+    ).all()
+    skill_counter = Counter()
+    for d in drives:
+        for skill in d.required_skills.split(','):
+            cleaned = skill.strip()
+            if cleaned:
+                skill_counter[cleaned] += 1
+    top_skills = [{'skill': s, 'count': c} for s, c in skill_counter.most_common(10)]
+
+    # ── Summary ──────────────────────────────────────────────────────────
+    payload = {
+        'funnel':           funnel,
+        'selection_rate':   selection_rate,
+        'placement_rate':   placement_rate,
+        'total_placements': total_placements,
+        'top_skills':       top_skills,
+        'total_students':   Student.query.count(),
+        'total_companies':  Company.query.filter_by(approval_status=ApprovalStatus.APPROVED).count(),
+        'total_drives':     PlacementDrive.query.count(),
+    }
+
+    safe_set(cache_key, payload, timeout=300)   # 5 min TTL
+    return jsonify(payload), 200
 
 
 # ── Companies ────────────────────────────────────────────────────────────
@@ -178,6 +253,8 @@ def approve_company(company_id):
     company.approval_status = ApprovalStatus.APPROVED
     db.session.commit()
     invalidate_namespace('admin_companies')
+    safe_delete(admin_dashboard_key())
+    safe_delete(public_stats_key())
     return jsonify({'msg': f'{company.company_name} has been approved.', 'id': company.id,
                      'new_status': company.approval_status}), 200
 
@@ -191,6 +268,7 @@ def reject_company(company_id):
     company.approval_status = ApprovalStatus.REJECTED
     db.session.commit()
     invalidate_namespace('admin_companies')
+    safe_delete(admin_dashboard_key())
     return jsonify({'msg': f'{company.company_name} has been rejected.', 'id': company.id,
                      'new_status': company.approval_status}), 200
 
@@ -218,6 +296,8 @@ def delete_company(company_id):
     db.session.delete(company)
     db.session.commit()
     invalidate_namespace('admin_companies')
+    safe_delete(admin_dashboard_key())
+    safe_delete(public_stats_key())
     return jsonify({'msg': 'Company deleted.', 'id': company_id}), 200
 
 
@@ -243,26 +323,37 @@ def bulk_company_status():
 
     db.session.commit()
     invalidate_namespace('admin_companies')
+    safe_delete(admin_dashboard_key())
+    safe_delete(public_stats_key())
     return jsonify({'msg': f'{len(updated_ids)} companies marked as {new_status}.',
                      'updated_ids': updated_ids, 'new_status': new_status}), 200
 
 
-# ── Drives ───────────────────────────────────────────────────────────────
+# ── Drives (cached — 2 min TTL) ─────────────────────────────────────────
 
 @admin_bp.route('/drives')
 @admin_required
 def drives():
     status     = request.args.get('status', '').strip()
     company_id = request.args.get('company_id', '').strip()
-    query      = PlacementDrive.query
 
+    cache_key = admin_drives_key(status, company_id)
+    cached = safe_get(cache_key)
+    if cached is not None:
+        return jsonify(cached), 200
+
+    query = PlacementDrive.query
     if status:
         query = query.filter_by(status=status)
     if company_id:
         query = query.filter_by(company_id=company_id)
 
     drives_list = query.order_by(PlacementDrive.created_at.desc()).all()
-    return jsonify([serialize_drive(d) for d in drives_list]), 200
+    payload = [serialize_drive(d) for d in drives_list]
+
+    safe_set(cache_key, payload, timeout=120)   # 2 min TTL
+    remember_key('admin_drives', cache_key)
+    return jsonify(payload), 200
 
 
 @admin_bp.route('/drives/<int:drive_id>/approve', methods=['PUT'])
@@ -274,6 +365,9 @@ def approve_drive(drive_id):
     drive.status = DriveStatus.APPROVED
     db.session.commit()
     safe_delete(student_drives_key(''))
+    invalidate_namespace('admin_drives')
+    safe_delete(admin_dashboard_key())
+    safe_delete(public_stats_key())
     return jsonify({'msg': f'Drive "{drive.job_title}" approved.', 'id': drive.id,
                      'new_status': drive.status}), 200
 
@@ -287,6 +381,8 @@ def reject_drive(drive_id):
     drive.status = DriveStatus.REJECTED
     db.session.commit()
     safe_delete(student_drives_key(''))
+    invalidate_namespace('admin_drives')
+    safe_delete(admin_dashboard_key())
     return jsonify({'msg': f'Drive "{drive.job_title}" rejected.', 'id': drive.id,
                      'new_status': drive.status}), 200
 
@@ -300,6 +396,9 @@ def delete_drive(drive_id):
     db.session.delete(drive)
     db.session.commit()
     safe_delete(student_drives_key(''))
+    invalidate_namespace('admin_drives')
+    safe_delete(admin_dashboard_key())
+    safe_delete(public_stats_key())
     return jsonify({'msg': 'Drive deleted.', 'id': drive_id}), 200
 
 
@@ -325,6 +424,9 @@ def bulk_drive_status():
 
     db.session.commit()
     safe_delete(student_drives_key(''))
+    invalidate_namespace('admin_drives')
+    safe_delete(admin_dashboard_key())
+    safe_delete(public_stats_key())
     return jsonify({'msg': f'{len(updated_ids)} drives marked as {new_status}.',
                      'updated_ids': updated_ids, 'new_status': new_status}), 200
 
@@ -398,6 +500,8 @@ def delete_student(student_id):
     db.session.delete(student)
     db.session.commit()
     invalidate_namespace('admin_students')
+    safe_delete(admin_dashboard_key())
+    safe_delete(public_stats_key())
     return jsonify({'msg': 'Student deleted.', 'id': student_id}), 200
 
 

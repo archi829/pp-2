@@ -13,20 +13,21 @@ from flask import Flask, jsonify, render_template, g
 
 from config import Config
 from models import db
-from extensions import jwt, cors, cache, make_celery
+from extensions import jwt, cors, cache, limiter, make_celery
 
 from routes.auth    import auth_bp
 from routes.admin   import admin_bp
 from routes.company import company_bp
 from routes.student import student_bp
 from routes.api     import api_bp
+from routes.public  import public_bp
 
 
-def create_app():
+def create_app(config_class=Config):
     app = Flask(__name__)
 
     # ── Config ────────────────────────────────────────────────────────────────
-    app.config.from_object(Config)
+    app.config.from_object(config_class)
 
     # ── Extensions ────────────────────────────────────────────────────────────
     db.init_app(app)
@@ -35,6 +36,7 @@ def create_app():
     # If running Vue dev server on port 5173, add: origins=["http://localhost:5173"]
     cors.init_app(app, origins=["http://localhost:5000"])
     cache.init_app(app)
+    limiter.init_app(app)
 
     app.celery = make_celery(app)   # stored on app so tasks.py/celery_worker.py can use it
 
@@ -51,10 +53,11 @@ def create_app():
 
     # ── Blueprints ────────────────────────────────────────────────────────────
     app.register_blueprint(auth_bp)     # /api/auth/*
-    app.register_blueprint(admin_bp)    # /admin/*   ← Jinja2 (to be replaced in M3)
-    app.register_blueprint(company_bp)  # /company/* ← Jinja2 (to be replaced in M4)
-    app.register_blueprint(student_bp)  # /student/* ← Jinja2 (to be replaced in M5)
-    app.register_blueprint(api_bp)      # /api/*     ← Flask-RESTful (to be expanded M3+)
+    app.register_blueprint(admin_bp)    # /api/admin/*
+    app.register_blueprint(company_bp)  # /api/company/*
+    app.register_blueprint(student_bp)  # /api/student/*
+    app.register_blueprint(api_bp)      # /api/*
+    app.register_blueprint(public_bp)   # /api/public/*
 
     # ── Vue SPA entry point ───────────────────────────────────────────────────
     # All non-API, non-static routes serve index.html so Vue Router handles navigation.
@@ -91,6 +94,10 @@ def create_app():
     @app.errorhandler(404)
     def not_found(e):
         return jsonify({"msg": "Resource not found."}), 404
+
+    @app.errorhandler(429)
+    def ratelimit_handler(e):
+        return jsonify({"msg": "Too many requests. Please try again later."}), 429
 
     @app.errorhandler(500)
     def server_error(e):
