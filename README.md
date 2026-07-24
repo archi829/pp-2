@@ -101,7 +101,7 @@ flowchart TD
     subgraph API[" API Layer — Flask (Gunicorn, Dockerized) "]
         direction LR
         RT[Route Handlers\nauth · admin · company · student]
-        MW[Middleware Pipeline\nJWT Auth · Rate Limiting (Flask-Limiter)]
+        MW["Middleware Pipeline<br/>JWT Auth · Rate Limiting (Flask-Limiter)"]
     end
 
     subgraph SVC[" Service Layer "]
@@ -113,7 +113,7 @@ flowchart TD
     
     subgraph WKR[" Background Workers — Celery (Dockerized) "]
         direction TB
-        BEAT[Celery Beat\nScheduled Tasks (e.g., Monthly Reports)]
+        BEAT["Celery Beat<br/>Scheduled Tasks (e.g., Monthly Reports)"]
         WORKER[Celery Workers\nEmail, CSV Export, AI Generation]
     end
 
@@ -185,7 +185,7 @@ flowchart TD
     START([User Login]) --> POST[POST /api/auth/login]
     POST --> HASH[Verify bcrypt/Werkzeug password hash]
     
-    HASH -->|Valid| JWT[Issue JWT Access Token\n(24h expiry)]
+    HASH -->|Valid| JWT["Issue JWT Access Token<br/>(24h expiry)"]
     HASH -->|Invalid| ERR([401 Unauthorized])
     
     JWT --> CLIENT[Client stores JWT in memory/localStorage]
